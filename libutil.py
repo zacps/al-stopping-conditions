@@ -4,6 +4,7 @@ from joblib import Parallel
 from sklearn.metrics import accuracy_score, f1_score, roc_auc_score
 from tqdm.notebook import tqdm
 from art.metrics import empirical_robustness
+from art.estimators.classification import SklearnClassifier
 
 class ProgressParallel(Parallel):
     def __init__(
@@ -37,9 +38,12 @@ class Metrics:
             metrics = [accuracy_score, f1_score, roc_auc_score]
         self.name = name
         self.metrics = metrics
-        self.frame = pd.DataFrame({"x": [], **{f.__name__: [] for f in metrics}})
+        if "time" in metrics:
+            self.frame = pd.DataFrame({"x": [], **{f.__name__: [] for f in metrics if f != "time"}, "time": []})
+        else:
+            self.frame = pd.DataFrame({"x": [], **{f.__name__: [] for f in metrics}})
 
-    def collect(self, x, clf, labels, test_set):
+    def collect(self, x, clf, labels, test_set, t_elapsed=None):
         """
         Collect metrics from the classifier using a particular test set and marking the point at x.
         """
@@ -47,8 +51,8 @@ class Metrics:
         result = {}
         for metric in self.metrics:
             if metric == f1_score:
-                result[metric.__name__] = metric(
-                    labels, clf.predict(test_set), average='micro' if len(np.unique(labels)) > 2 else 'binary'
+                result[metric.__name__] = f1_score(
+                    labels, clf.predict(test_set), average='micro' if len(np.unique(labels)) > 2 else 'binary', pos_label=np.unique(labels)[1]
                 )
             elif metric == roc_auc_score:
                 if len(np.unique(labels)) > 2:
@@ -58,7 +62,9 @@ class Metrics:
                 else:
                     result[metric.__name__] = roc_auc_score(labels, clf.predict_proba(test_set)[:,1])
             elif metric == empirical_robustness:
-                result[metric.__name__] = empirical_robustness(clf, x, 'fgm', attack_params={eps=0.2}) 
+                result[metric.__name__] = empirical_robustness(SklearnClassifier(clf), test_set, 'fgsm', attack_params={"eps": 0.2}) 
+            elif metric == "time":
+                result["time"] = t_elapsed
             else:
                 result[metric.__name__] = metric(labels, clf.predict(test_set))
                     
@@ -68,14 +74,13 @@ class Metrics:
         merged = pd.concat([self.frame] + [other.frame for other in others])
         averaged = merged.groupby(merged.index).mean()
         sem = merged.groupby(merged.index).sem()
+        sem.columns = [str(col) + '_stderr' for col in sem.columns]
         return averaged, sem
-
-def generate_query_synthesis():
-    """
-    Generate data and an oracle for query synthesis active learning.
     
-    Returns:
-    * An initial training set X
-    * Labels for X
-    * An oracle 
-    """
+    def average2(self, others):
+        merged = pd.concat([self.frame] + [other.frame for other in others])
+        averaged = merged.groupby(merged.index).mean()
+        sem = merged.groupby(merged.index).sem()
+        sem.columns = [str(col) + '_stderr' for col in sem.columns]
+        return pd.concat([averaged, sem], axis=1)
+        

@@ -1,4 +1,5 @@
 from typing import Tuple, Union, Callable
+import time
 
 import matplotlib.pyplot as plt
 from matplotlib.patches import ConnectionPatch
@@ -14,7 +15,7 @@ from sklearn.metrics import accuracy_score, f1_score, roc_auc_score
 from sklearn.model_selection import train_test_split
 
 from libadversarial import fgm, deepfool
-from libplot import plot_classification
+from libplot import plot_classification, plot_poison, c_plot_poison
 from libutil import Metrics
 
 
@@ -156,6 +157,7 @@ def active_learn2(
     query_strategy,
     model="svm-linear",
     teach_advesarial=False,
+    stop_function = lambda learner: False
 ) -> Tuple[list, list]:
     """
     Perform active learning on the given dataset using a linear SVM model, querying data with the given query strategy.
@@ -203,7 +205,7 @@ def active_learn2(
     metrics = Metrics()
     metrics.collect(len(X_labelled), learner.estimator, Y_test, X_test)
 
-    while len(X_unlabelled) != 0:
+    while len(X_unlabelled) != 0 and not stop_function(learner):
         if query_strategy == fgm:
             query_idx, advesarial_examples = learner.query(X_unlabelled)
 
@@ -225,12 +227,20 @@ def active_learn2(
 
 
 class MyActiveLearner:
-    def __init__(self, animate=False):
+    def __init__(self, animate=False, metrics=None, poison=False, animation_file=None, lb=None, ub=None):
         self.animate = animate
-        self.metrics = Metrics()
+        self.metrics = Metrics(metrics=metrics)
+        self.animation_file = animation_file
+        self.poison = poison
+        
+        self.lb=lb
+        self.ub=ub
         
         if self.animate:
-            self.fig, self.ax = plt.subplots(1, 1, figsize=(10, 10))
+            if poison:
+                self.fig, self.ax = plt.subplots(1, 2, figsize=(20, 10))
+            else:
+                self.fig, self.ax = plt.subplots(1, 1, figsize=(10, 10))
             self.cam = Camera(self.fig)
         
     def __setup_learner(self, X_labelled, Y_labelled, query_strategy, model):
@@ -271,38 +281,84 @@ class MyActiveLearner:
         else:
             raise Exception("unknown model")
             
-    def __animation_frame(self, learner, X_unlabelled=None, new=None, new_labels=None, start_points=None):
+    def __animation_frame(self, learner, X_unlabelled=None, new=None, new_labels=None, start_points=None, ax=None):
+        if ax is None:
+            ax = self.ax
+        if X_unlabelled is not None:
+            ax.scatter(X_unlabelled[:,0], X_unlabelled[:,1], c='black', s=20)
+        
         plot_classification(
-            self.ax,
+            ax,
             learner.estimator,
             learner.X_training,
             learner.y_training,
-            np.vstack(learner.X_training),
+            np.concatenate((learner.X_training, X_unlabelled), axis=0) if X_unlabelled else learner.X_training,
         )
-        
-        if new is not None:
-            self.ax.scatter(new[:,0], new[:,1], cmap=plt.cm.coolwarm, c=new_labels, s=30)
-            if start_points is not None:
-                for start, end in zip(start_points, new):
-                    #self.ax.arrow(start[0], start[1], end[0]-start[0], end[1]-start[1])
-                    self.ax.add_artist(ConnectionPatch(
-                        start, end, "data", "data",
-                          arrowstyle="->", shrinkA=5, shrinkB=5,
-                          mutation_scale=20, fc="w"
-                    ))
-        if X_unlabelled is not None:
-            self.ax.scatter(X_unlabelled[0], X_unlabelled[1], c='black', s=20)
             
-        self.ax.text(
+        ax.text(
             0.9,
             0.05,
             str(
                 learner.X_training.shape[0],
             ),
-            transform=self.ax.transAxes,
+            transform=ax.transAxes,
             c="white",
         )
         self.cam.snap()
+        
+    def __animation_frame_poison(self, learner, X_test, y_test, attack_points, start_points, ax=None):
+        if ax is None:
+            ax = self.ax
+        plot_poison(
+            clf=learner.estimator, 
+            X_labelled=learner.X_training, 
+            y_labelled=learner.y_training, 
+            X_unlabelled=None, 
+            y_unlabelled=None, 
+            X_test=X_test, 
+            y_test=y_test, 
+            attack=None, 
+            attack_points=attack_points,
+            start_points=start_points,
+            start_points_y=learner.estimator.predict(start_points),
+            ax=ax
+        )
+            
+        ax.text(
+            0.9,
+            0.05,
+            str(
+                learner.X_training.shape[0],
+            ),
+            transform=ax.transAxes,
+            c="white",
+        )
+        
+    def __animation_frame_poison_c(self, learner, attack, lb, ub, attack_points, start_points, x_seq=None, ax=None):
+        if ax is None:
+            ax = self.ax
+        c_plot_poison(
+            X_labelled=learner.X_training, 
+            y_labelled=learner.y_training, 
+            attack=attack,
+            lb=lb,
+            ub=ub,
+            attack_points=attack_points,
+            start_points=start_points,
+            start_points_y=learner.estimator.predict(start_points) if start_points is not None else None,
+            x_seq=x_seq,
+            ax=ax
+        )
+        
+        ax.text(
+            0.9,
+            0.05,
+            str(
+                learner.X_training.shape[0],
+            ),
+            transform=ax.transAxes,
+            c="white",
+        )
 
     def active_learn2(
         self,
@@ -315,6 +371,7 @@ class MyActiveLearner:
         query_strategy,
         model="svm-linear",
         teach_advesarial=False,
+        stop_function = lambda learner: False
     ) -> Tuple[list, list]:
         """
         Perform active learning on the given dataset using a linear SVM model, querying data with the given query strategy.
@@ -327,12 +384,14 @@ class MyActiveLearner:
         self.metrics.collect(len(X_labelled), learner.estimator, Y_test, X_test)
 
         if self.animate:
-            self.__animation_frame(learner, X_labelled, X_unlabelled)
+            self.__animation_frame(learner, X_unlabelled)
 
-        while len(X_unlabelled) != 0:
+        while len(X_unlabelled) != 0 and not stop_function(learner):
+            t_start = time.monotonic()
             query_idx, query_points = learner.query(X_unlabelled)
+            t_elapsed = time.monotonic()-t_start
                 
-            if teach_advesarial and (query_strategy == fgm or query_strategy == deepfool):
+            if query_points is not None and (query_strategy == fgm or query_strategy == deepfool):
                 learner.teach(query_points, Y_oracle[query_idx])
                 
             learner.teach(X_unlabelled[query_idx], Y_oracle[query_idx])
@@ -345,16 +404,20 @@ class MyActiveLearner:
                 learner.estimator,
                 Y_test,
                 X_test,
+                t_elapsed=t_elapsed
             )
 
             if self.animate:
-                self.__animation_frame(learner, X_labelled, X_unlabelled)
+                self.__animation_frame(learner, X_unlabelled)
 
         if self.animate:
+            animation = self.cam.animate(interval=500, repeat_delay=1000)
+            if self.animation_file is not None:
+                animation.save(animation_file)
             display(
-                HTML(cam.animate(interval=500, repeat_delay=1000).to_html5_video())
-            )  # milleseconds
-            plt.close(fig)
+                HTML(animation.to_html5_video())
+            )
+            plt.close(self.fig)
 
         return self.metrics
     
@@ -380,11 +443,21 @@ class MyActiveLearner:
 
         self.metrics.collect(len(X_labelled), learner.estimator, Y_test, X_test)
 
-        if self.animate:
+        if self.animate and not self.poison:
             self.__animation_frame(learner)
+        elif self.animate and self.poison:    
+            self.__animation_frame(learner, ax=self.ax[0])
+            self.__animation_frame_poison_c(learner, None, lb=self.lb, ub=self.ub, attack_points=None, start_points=None, ax=self.ax[1])
 
         while not should_stop(learner, self.metrics.frame.iloc[-1]):
-            _, query_points, start_points = learner.query(None, learner.X_training, learner.y_training)
+            try:
+                t_start = time.monotonic()
+                _, query_points, start_points, attack, x_seq = learner.query(None, learner.X_training, learner.y_training)
+                t_elapsed = time.monotonic()-t_start
+            except np.linalg.LinAlgError:
+                print("WARN: Break due to convergence failure")
+                break
+                
             labels = y_oracle(query_points)
             learner.teach(query_points, labels)
 
@@ -393,15 +466,32 @@ class MyActiveLearner:
                 learner.estimator,
                 Y_test,
                 X_test,
+                t_elapsed=t_elapsed
             )
 
-            if self.animate:
+            if self.animate and not self.poison:
                 self.__animation_frame(learner, new=query_points, new_labels=labels, start_points=start_points)
+            elif self.animate and self.poison:
+                self.__animation_frame_poison(learner, X_test, Y_test, query_points, start_points, ax=self.ax[0])
+                self.__animation_frame_poison_c(
+                    learner, 
+                    attack,
+                    lb=self.lb, 
+                    ub=self.ub, 
+                    attack_points=query_points, 
+                    start_points=start_points,
+                    x_seq=x_seq,
+                    ax=self.ax[1]
+                )
+                self.cam.snap()
 
         if self.animate:
+            animation = self.cam.animate(interval=500, repeat_delay=1000)
+            if self.animation_file is not None:
+                animation.save(animation_file)
             display(
-                HTML(self.cam.animate(interval=500, repeat_delay=1000).to_html5_video())
-            )  # milleseconds
+                HTML(animation.to_html5_video())
+            )
             plt.close(self.fig)
 
         return self.metrics
