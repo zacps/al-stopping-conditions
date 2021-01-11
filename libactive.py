@@ -40,6 +40,7 @@ def active_split(X, Y, test_size=0.5, labeled_size=0.1, shuffle=True):
 
     return X_labelled, X_unlabelled, Y_labelled, Y_oracle, X_test, Y_test
 
+
 def active_split_query_synthesis(X, Y, test_size=0.5, labeled_size=0.1, shuffle=True):
     """
     Split data into three sets:
@@ -60,7 +61,6 @@ def active_split_query_synthesis(X, Y, test_size=0.5, labeled_size=0.1, shuffle=
     )
 
     return X_labelled, X_unlabelled, Y_labelled, Y_oracle, X_test, Y_test
-
 
 
 def active_learn(
@@ -157,7 +157,7 @@ def active_learn2(
     query_strategy,
     model="svm-linear",
     teach_advesarial=False,
-    stop_function = lambda learner: False
+    stop_function=lambda learner: False,
 ) -> Tuple[list, list]:
     """
     Perform active learning on the given dataset using a linear SVM model, querying data with the given query strategy.
@@ -227,22 +227,30 @@ def active_learn2(
 
 
 class MyActiveLearner:
-    def __init__(self, animate=False, metrics=None, poison=False, animation_file=None, lb=None, ub=None):
+    def __init__(
+        self,
+        animate=False,
+        metrics=None,
+        poison=False,
+        animation_file=None,
+        lb=None,
+        ub=None,
+    ):
         self.animate = animate
         self.metrics = Metrics(metrics=metrics)
         self.animation_file = animation_file
         self.poison = poison
-        
-        self.lb=lb
-        self.ub=ub
-        
+
+        self.lb = lb
+        self.ub = ub
+
         if self.animate:
             if poison:
                 self.fig, self.ax = plt.subplots(1, 2, figsize=(20, 10))
             else:
                 self.fig, self.ax = plt.subplots(1, 1, figsize=(10, 10))
             self.cam = Camera(self.fig)
-        
+
     def __setup_learner(self, X_labelled, Y_labelled, query_strategy, model):
         if model == "svm-linear":
             return ActiveLearner(
@@ -280,21 +288,31 @@ class MyActiveLearner:
             )
         else:
             raise Exception("unknown model")
-            
-    def __animation_frame(self, learner, X_unlabelled=None, new=None, new_labels=None, start_points=None, ax=None):
+
+    def __animation_frame(
+        self,
+        learner,
+        X_unlabelled=None,
+        new=None,
+        new_labels=None,
+        start_points=None,
+        ax=None,
+    ):
         if ax is None:
             ax = self.ax
         if X_unlabelled is not None:
-            ax.scatter(X_unlabelled[:,0], X_unlabelled[:,1], c='black', s=20)
-        
+            ax.scatter(X_unlabelled[:, 0], X_unlabelled[:, 1], c="black", s=20)
+
         plot_classification(
             ax,
             learner.estimator,
             learner.X_training,
             learner.y_training,
-            np.concatenate((learner.X_training, X_unlabelled), axis=0) if X_unlabelled else learner.X_training,
+            np.concatenate((learner.X_training, X_unlabelled), axis=0)
+            if X_unlabelled
+            else learner.X_training,
         )
-            
+
         ax.text(
             0.9,
             0.05,
@@ -305,25 +323,27 @@ class MyActiveLearner:
             c="white",
         )
         self.cam.snap()
-        
-    def __animation_frame_poison(self, learner, X_test, y_test, attack_points, start_points, ax=None):
+
+    def __animation_frame_poison(
+        self, learner, X_test, y_test, attack_points, start_points, ax=None
+    ):
         if ax is None:
             ax = self.ax
         plot_poison(
-            clf=learner.estimator, 
-            X_labelled=learner.X_training, 
-            y_labelled=learner.y_training, 
-            X_unlabelled=None, 
-            y_unlabelled=None, 
-            X_test=X_test, 
-            y_test=y_test, 
-            attack=None, 
+            clf=learner.estimator,
+            X_labelled=learner.X_training,
+            y_labelled=learner.y_training,
+            X_unlabelled=None,
+            y_unlabelled=None,
+            X_test=X_test,
+            y_test=y_test,
+            attack=None,
             attack_points=attack_points,
             start_points=start_points,
             start_points_y=learner.estimator.predict(start_points),
-            ax=ax
+            ax=ax,
         )
-            
+
         ax.text(
             0.9,
             0.05,
@@ -333,23 +353,27 @@ class MyActiveLearner:
             transform=ax.transAxes,
             c="white",
         )
-        
-    def __animation_frame_poison_c(self, learner, attack, lb, ub, attack_points, start_points, x_seq=None, ax=None):
+
+    def __animation_frame_poison_c(
+        self, learner, attack, lb, ub, attack_points, start_points, x_seq=None, ax=None
+    ):
         if ax is None:
             ax = self.ax
         c_plot_poison(
-            X_labelled=learner.X_training, 
-            y_labelled=learner.y_training, 
+            X_labelled=learner.X_training,
+            y_labelled=learner.y_training,
             attack=attack,
             lb=lb,
             ub=ub,
             attack_points=attack_points,
             start_points=start_points,
-            start_points_y=learner.estimator.predict(start_points) if start_points is not None else None,
+            start_points_y=learner.estimator.predict(start_points)
+            if start_points is not None
+            else None,
             x_seq=x_seq,
-            ax=ax
+            ax=ax,
         )
-        
+
         ax.text(
             0.9,
             0.05,
@@ -371,7 +395,7 @@ class MyActiveLearner:
         query_strategy,
         model="svm-linear",
         teach_advesarial=False,
-        stop_function = lambda learner: False
+        stop_function=lambda learner: False,
     ) -> Tuple[list, list]:
         """
         Perform active learning on the given dataset using a linear SVM model, querying data with the given query strategy.
@@ -379,7 +403,17 @@ class MyActiveLearner:
         Returns the accuracy curve.
         """
 
-        learner = self.__setup_learner(X_labelled,Y_labelled,query_strategy,model="svm-linear")
+        # Take a subset if the unlabelled set size is too large
+        if X_unlabelled.shape[0] > 1000:
+            print("INFO: Using sample of unlabelled set")
+            rng = np.random.default_rng()
+            idx = rng.choice(X_unlabelled.shape[0], 1000, replace=False)
+            X_unlabelled = X_unlabelled[idx]
+            Y_oracle = Y_oracle[idx]
+
+        learner = self.__setup_learner(
+            X_labelled, Y_labelled, query_strategy, model="svm-linear"
+        )
 
         self.metrics.collect(len(X_labelled), learner.estimator, Y_test, X_test)
 
@@ -389,11 +423,13 @@ class MyActiveLearner:
         while len(X_unlabelled) != 0 and not stop_function(learner):
             t_start = time.monotonic()
             query_idx, query_points = learner.query(X_unlabelled)
-            t_elapsed = time.monotonic()-t_start
-                
-            if query_points is not None and (query_strategy == fgm or query_strategy == deepfool):
+            t_elapsed = time.monotonic() - t_start
+
+            if query_points is not None and (
+                query_strategy == fgm or query_strategy == deepfool
+            ):
                 learner.teach(query_points, Y_oracle[query_idx])
-                
+
             learner.teach(X_unlabelled[query_idx], Y_oracle[query_idx])
 
             X_unlabelled = np.delete(X_unlabelled, query_idx, axis=0)
@@ -404,7 +440,7 @@ class MyActiveLearner:
                 learner.estimator,
                 Y_test,
                 X_test,
-                t_elapsed=t_elapsed
+                t_elapsed=t_elapsed,
             )
 
             if self.animate:
@@ -414,13 +450,11 @@ class MyActiveLearner:
             animation = self.cam.animate(interval=500, repeat_delay=1000)
             if self.animation_file is not None:
                 animation.save(animation_file)
-            display(
-                HTML(animation.to_html5_video())
-            )
+            display(HTML(animation.to_html5_video()))
             plt.close(self.fig)
 
         return self.metrics
-    
+
     def active_learn_query_synthesis(
         self,
         X_labelled,
@@ -432,6 +466,7 @@ class MyActiveLearner:
         should_stop: Callable,
         model="svm-linear",
         teach_advesarial=False,
+        track_flips=False,
     ) -> Tuple[list, list]:
         """
         Perform active learning on the given dataset using a linear SVM model, querying data with the given query strategy.
@@ -439,26 +474,49 @@ class MyActiveLearner:
         Returns metrics.
         """
 
-        learner = self.__setup_learner(X_labelled,Y_labelled,query_strategy,model="svm-linear")
+        total_labels = 0
+        oracle_matched_poison = 0
+
+        learner = self.__setup_learner(
+            X_labelled, Y_labelled, query_strategy, model="svm-linear"
+        )
 
         self.metrics.collect(len(X_labelled), learner.estimator, Y_test, X_test)
 
         if self.animate and not self.poison:
             self.__animation_frame(learner)
-        elif self.animate and self.poison:    
+        elif self.animate and self.poison:
             self.__animation_frame(learner, ax=self.ax[0])
-            self.__animation_frame_poison_c(learner, None, lb=self.lb, ub=self.ub, attack_points=None, start_points=None, ax=self.ax[1])
+            self.__animation_frame_poison_c(
+                learner,
+                None,
+                lb=self.lb,
+                ub=self.ub,
+                attack_points=None,
+                start_points=None,
+                ax=self.ax[1],
+            )
 
         while not should_stop(learner, self.metrics.frame.iloc[-1]):
             try:
                 t_start = time.monotonic()
-                _, query_points, start_points, attack, x_seq = learner.query(None, learner.X_training, learner.y_training)
-                t_elapsed = time.monotonic()-t_start
+                (
+                    _,
+                    query_points,
+                    start_points,
+                    attack,
+                    x_seq,
+                    query_points_labels,
+                ) = learner.query(None, learner.X_training, learner.y_training)
+                t_elapsed = time.monotonic() - t_start
             except np.linalg.LinAlgError:
                 print("WARN: Break due to convergence failure")
                 break
-                
+
             labels = y_oracle(query_points)
+            total_labels += len(labels)
+            oracle_matched_poison += np.count_nonzero(labels == query_points_labels)
+
             learner.teach(query_points, labels)
 
             self.metrics.collect(
@@ -466,22 +524,29 @@ class MyActiveLearner:
                 learner.estimator,
                 Y_test,
                 X_test,
-                t_elapsed=t_elapsed
+                t_elapsed=t_elapsed,
             )
 
             if self.animate and not self.poison:
-                self.__animation_frame(learner, new=query_points, new_labels=labels, start_points=start_points)
+                self.__animation_frame(
+                    learner,
+                    new=query_points,
+                    new_labels=labels,
+                    start_points=start_points,
+                )
             elif self.animate and self.poison:
-                self.__animation_frame_poison(learner, X_test, Y_test, query_points, start_points, ax=self.ax[0])
+                self.__animation_frame_poison(
+                    learner, X_test, Y_test, query_points, start_points, ax=self.ax[0]
+                )
                 self.__animation_frame_poison_c(
-                    learner, 
+                    learner,
                     attack,
-                    lb=self.lb, 
-                    ub=self.ub, 
-                    attack_points=query_points, 
+                    lb=self.lb,
+                    ub=self.ub,
+                    attack_points=query_points,
                     start_points=start_points,
                     x_seq=x_seq,
-                    ax=self.ax[1]
+                    ax=self.ax[1],
                 )
                 self.cam.snap()
 
@@ -489,13 +554,17 @@ class MyActiveLearner:
             animation = self.cam.animate(interval=500, repeat_delay=1000)
             if self.animation_file is not None:
                 animation.save(animation_file)
-            display(
-                HTML(animation.to_html5_video())
-            )
+            display(HTML(animation.to_html5_video()))
             plt.close(self.fig)
 
+        if track_flips:
+            print(
+                f"{oracle_matched_poison} of {total_labels} had equal oracle and poison attack labels"
+            )
+
         return self.metrics
-    
+
+
 def beam_search(
     X_labelled,
     X_unlabelled,
@@ -503,15 +572,15 @@ def beam_search(
     Y_oracle,
     X_test,
     Y_test,
-):  
+):
     scores = []
     for x_idx, x in enumerate(X_unlabelled):
-        clf = svm.SVC(kernel='linear')
-        clf.fit(X_labelled+x, Y_labelled+Y_oracle[x_idx])
+        clf = svm.SVC(kernel="linear")
+        clf.fit(X_labelled + x, Y_labelled + Y_oracle[x_idx])
         scores.append(accuracy_score(Y_test, clf.predict(X_test)))
     best_idx = np.argsort(scores)[:5]
     best = X_unlabelled[best_idx]
-    
+
     best_idx = np.expand_dims(best_idx, axis=-1)
 
     while True:
@@ -521,21 +590,29 @@ def beam_search(
             for x2_idx, x2 in enumerate(X_unlabelled):
                 if x2 in X_unlabelled[x1_idxes]:
                     continue
-                    
+
                 done_work = True
-                clf = svm.SVC(kernel='linear')
-                
+                clf = svm.SVC(kernel="linear")
+
                 clf.fit(
-                    np.append(np.append(X_labelled, X_unlabelled[x1_idxes], axis=0), [x2], axis=0),
-                    np.append(np.append(Y_labelled, Y_oracle[x1_idxes], axis=0), [Y_oracle[x2_idx]], axis=0)
+                    np.append(
+                        np.append(X_labelled, X_unlabelled[x1_idxes], axis=0),
+                        [x2],
+                        axis=0,
+                    ),
+                    np.append(
+                        np.append(Y_labelled, Y_oracle[x1_idxes], axis=0),
+                        [Y_oracle[x2_idx]],
+                        axis=0,
+                    ),
                 )
                 scores[i].append(accuracy_score(Y_test, clf.predict(X_test)))
 
         if not done_work:
-            break      
-                
+            break
+
         best_idx2 = np.argsort(scores, axis=None)[:5]
-        
+
         idx = np.unravel_index(best_idx2, shape=np.array(scores).shape)
         print(best_idx)
         print(scores)
@@ -546,9 +623,6 @@ def beam_search(
         else:
             best_idx2 = idx[1]
         best_idx2 = np.expand_dims(best_idx2, axis=0)
-        best_idx = np.block([
-            [np.array(best_idx), best_idx2.T]
-        ])
-        
-    
+        best_idx = np.block([[np.array(best_idx), best_idx2.T]])
+
     return best_idx

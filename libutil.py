@@ -6,6 +6,7 @@ from tqdm.notebook import tqdm
 from art.metrics import empirical_robustness
 from art.estimators.classification import SklearnClassifier
 
+
 class ProgressParallel(Parallel):
     def __init__(
         self, use_tqdm=True, total=None, desc=None, leave=True, *args, **kwargs
@@ -39,7 +40,13 @@ class Metrics:
         self.name = name
         self.metrics = metrics
         if "time" in metrics:
-            self.frame = pd.DataFrame({"x": [], **{f.__name__: [] for f in metrics if f != "time"}, "time": []})
+            self.frame = pd.DataFrame(
+                {
+                    "x": [],
+                    **{f.__name__: [] for f in metrics if f != "time"},
+                    "time": [],
+                }
+            )
         else:
             self.frame = pd.DataFrame({"x": [], **{f.__name__: [] for f in metrics}})
 
@@ -52,35 +59,42 @@ class Metrics:
         for metric in self.metrics:
             if metric == f1_score:
                 result[metric.__name__] = f1_score(
-                    labels, clf.predict(test_set), average='micro' if len(np.unique(labels)) > 2 else 'binary', pos_label=np.unique(labels)[1]
+                    labels,
+                    clf.predict(test_set),
+                    average="micro" if len(np.unique(labels)) > 2 else "binary",
+                    pos_label=np.unique(labels)[1],
                 )
             elif metric == roc_auc_score:
                 if len(np.unique(labels)) > 2:
+                    # print(f"proba shape {clf.predict_proba(test_set).shape} labels unique {len(np.unique(labels))}")
                     result[metric.__name__] = roc_auc_score(
-                        labels, clf.predict_proba(test_set), multi_class='ovr'
+                        labels, clf.predict_proba(test_set), multi_class="ovr"
                     )
                 else:
-                    result[metric.__name__] = roc_auc_score(labels, clf.predict_proba(test_set)[:,1])
+                    result[metric.__name__] = roc_auc_score(
+                        labels, clf.predict_proba(test_set)[:, 1]
+                    )
             elif metric == empirical_robustness:
-                result[metric.__name__] = empirical_robustness(SklearnClassifier(clf), test_set, 'fgsm', attack_params={"eps": 0.2}) 
+                result[metric.__name__] = empirical_robustness(
+                    SklearnClassifier(clf), test_set, "fgsm", attack_params={"eps": 0.2}
+                )
             elif metric == "time":
                 result["time"] = t_elapsed
             else:
                 result[metric.__name__] = metric(labels, clf.predict(test_set))
-                    
+
         self.frame = self.frame.append({"x": x, **result}, ignore_index=True)
 
     def average(self, others):
         merged = pd.concat([self.frame] + [other.frame for other in others])
         averaged = merged.groupby(merged.index).mean()
         sem = merged.groupby(merged.index).sem()
-        sem.columns = [str(col) + '_stderr' for col in sem.columns]
+        sem.columns = [str(col) + "_stderr" for col in sem.columns]
         return averaged, sem
-    
+
     def average2(self, others):
         merged = pd.concat([self.frame] + [other.frame for other in others])
         averaged = merged.groupby(merged.index).mean()
         sem = merged.groupby(merged.index).sem()
-        sem.columns = [str(col) + '_stderr' for col in sem.columns]
+        sem.columns = [str(col) + "_stderr" for col in sem.columns]
         return pd.concat([averaged, sem], axis=1)
-        
