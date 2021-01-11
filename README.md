@@ -4,7 +4,18 @@ This repository contains the code from a summer research project at the Universi
 
 The final report can be found [here](https://example.com).
 
+## Installation
+
+```bash
+$ pip install poetry
+$ poetry install
+```
+
 ## Reproducing
+
+```bash
+$ poetry run jupyter notebook
+```
 
 As this repository contains the complete code used to produce the results in the report it should be as simple as running the notebook containing the results you are interested in. Note, the runner framework `librun.run` caches results by default which are checked in. Hence to run the experiments yourself you will need to pass `force_run=True`.
 
