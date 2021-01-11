@@ -89,6 +89,8 @@ def plot_classification(ax, clf, X, Y, X_all):
     ax.set_xticks(())
     ax.set_yticks(())
 
+    return fig, ax
+
 
 def plot_poison(
     clf,

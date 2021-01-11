@@ -24,6 +24,7 @@ try:
 except Exception:
     from sklearn.svm import SVC
 
+
 def active_split(X, Y, test_size=0.5, labeled_size=0.1, shuffle=True):
     """
     Split data into three sets:
