@@ -8,7 +8,7 @@ from celluloid import Camera
 from IPython.core.display import HTML, display
 from modAL import batch, density, disagreement, uncertainty, utils
 from modAL.models import ActiveLearner, Committee
-from sklearn import datasets, metrics, svm, tree
+from sklearn import datasets, metrics, tree
 from sklearn.gaussian_process import GaussianProcessClassifier
 from sklearn.linear_model import LogisticRegression
 from sklearn.metrics import accuracy_score, f1_score, roc_auc_score
@@ -18,6 +18,11 @@ from libadversarial import fgm, deepfool
 from libplot import plot_classification, plot_poison, c_plot_poison
 from libutil import Metrics
 
+# Use GPU-based thundersvm when available
+try:
+    from thundersvm import SVC
+except Exception:
+    from sklearn.svm import SVC
 
 def active_split(X, Y, test_size=0.5, labeled_size=0.1, shuffle=True):
     """
@@ -82,7 +87,7 @@ def active_learn(
 
     if model == "svm-linear":
         learner = ActiveLearner(
-            estimator=svm.SVC(kernel="linear", probability=True),
+            estimator=SVC(kernel="linear", probability=True),
             X_training=X_labelled,
             y_training=Y_labelled,
             query_strategy=query_strategy,
@@ -91,13 +96,13 @@ def active_learn(
         learner = Committee(
             learner_list=[
                 ActiveLearner(
-                    estimator=svm.SVC(kernel="linear", probability=True),
+                    estimator=SVC(kernel="linear", probability=True),
                     X_training=X_labelled,
                     y_training=Y_labelled,
                 ),
                 # committee: logistic regression, svm-linear, svm-rbf, guassian process classifier
                 ActiveLearner(
-                    estimator=svm.SVC(kernel="rbf", probability=True),
+                    estimator=SVC(kernel="rbf", probability=True),
                     X_training=X_labelled,
                     y_training=Y_labelled,
                 ),
@@ -167,7 +172,7 @@ def active_learn2(
 
     if model == "svm-linear":
         learner = ActiveLearner(
-            estimator=svm.SVC(kernel="linear", probability=True),
+            estimator=SVC(kernel="linear", probability=True),
             X_training=X_labelled,
             y_training=Y_labelled,
             query_strategy=query_strategy,
@@ -176,13 +181,13 @@ def active_learn2(
         learner = Committee(
             learner_list=[
                 ActiveLearner(
-                    estimator=svm.SVC(kernel="linear", probability=True),
+                    estimator=SVC(kernel="linear", probability=True),
                     X_training=X_labelled,
                     y_training=Y_labelled,
                 ),
                 # committee: logistic regression, svm-linear, svm-rbf, guassian process classifier
                 ActiveLearner(
-                    estimator=svm.SVC(kernel="rbf", probability=True),
+                    estimator=SVC(kernel="rbf", probability=True),
                     X_training=X_labelled,
                     y_training=Y_labelled,
                 ),
@@ -254,7 +259,7 @@ class MyActiveLearner:
     def __setup_learner(self, X_labelled, Y_labelled, query_strategy, model):
         if model == "svm-linear":
             return ActiveLearner(
-                estimator=svm.SVC(kernel="linear", probability=True),
+                estimator=SVC(kernel="linear", probability=True),
                 X_training=X_labelled,
                 y_training=Y_labelled,
                 query_strategy=query_strategy,
@@ -263,13 +268,13 @@ class MyActiveLearner:
             return Committee(
                 learner_list=[
                     ActiveLearner(
-                        estimator=svm.SVC(kernel="linear", probability=True),
+                        estimator=SVC(kernel="linear", probability=True),
                         X_training=X_labelled,
                         y_training=Y_labelled,
                     ),
                     # committee: logistic regression, svm-linear, svm-rbf, guassian process classifier
                     ActiveLearner(
-                        estimator=svm.SVC(kernel="rbf", probability=True),
+                        estimator=SVC(kernel="rbf", probability=True),
                         X_training=X_labelled,
                         y_training=Y_labelled,
                     ),
@@ -575,7 +580,7 @@ def beam_search(
 ):
     scores = []
     for x_idx, x in enumerate(X_unlabelled):
-        clf = svm.SVC(kernel="linear")
+        clf = SVC(kernel="linear")
         clf.fit(X_labelled + x, Y_labelled + Y_oracle[x_idx])
         scores.append(accuracy_score(Y_test, clf.predict(X_test)))
     best_idx = np.argsort(scores)[:5]
@@ -592,7 +597,7 @@ def beam_search(
                     continue
 
                 done_work = True
-                clf = svm.SVC(kernel="linear")
+                clf = SVC(kernel="linear")
 
                 clf.fit(
                     np.append(
