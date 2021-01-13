@@ -41,4 +41,4 @@ As this repository contains the complete code used to produce the results in the
 
 All datasets are the property of their respective owners.
 
-All code, including notebooks, are licensed under GPL. The text of this license can be found in [LICENSE]().
+Unless otherwise specified all code, including notebooks, are licensed under GPL. The text of this license can be found in [LICENSE]().
