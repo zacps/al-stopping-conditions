@@ -21,8 +21,11 @@ from libutil import Metrics
 # Use GPU-based thundersvm when available
 try:
     from thundersvm import SVC
+    raise Exception("disabled")
+    print("Using ThunderSVM")
 except Exception:
     from sklearn.svm import SVC
+    print("Using sklearn")
 
 
 def active_split(X, Y, test_size=0.5, labeled_size=0.1, shuffle=True):
@@ -261,6 +264,20 @@ class MyActiveLearner:
         if model == "svm-linear":
             return ActiveLearner(
                 estimator=SVC(kernel="linear", probability=True),
+                X_training=X_labelled,
+                y_training=Y_labelled,
+                query_strategy=query_strategy,
+            )
+        elif model == "svm-rbf":
+            return ActiveLearner(
+                estimator=SVC(kernel="rbf", probability=True),
+                X_training=X_labelled,
+                y_training=Y_labelled,
+                query_strategy=query_strategy,
+            )
+        elif model == "svm-poly":
+            return ActiveLearner(
+                estimator=SVC(kernel="poly", probability=True),
                 X_training=X_labelled,
                 y_training=Y_labelled,
                 query_strategy=query_strategy,

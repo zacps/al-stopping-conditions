@@ -182,7 +182,7 @@ def skin(dataset_size=4177):
     X = np.append(X, isInB, axis=1)
 
     # draw sample
-    X, _, y, _ = train_test_split(X, y, test_size=0.95)
+    X, _, y, _ = train_test_split(X, y, test_size=0.95, random_state=42)
 
     return X, y
 

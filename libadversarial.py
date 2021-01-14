@@ -1,7 +1,11 @@
+from functools import partial
+from pathlib import Path
+import warnings
+
 import sklearn
 import numpy as np
 from modAL import batch, uncertainty, density, utils, disagreement
-from art.estimators.classification.scikitlearn import SklearnClassifier
+from art.estimators.classification.scikitlearn import ScikitlearnSVC
 from art.attacks.evasion import FastGradientMethod, DeepFool
 from art.attacks.poisoning import PoisoningAttackSVM
 from sklearn.metrics.pairwise import paired_distances, euclidean_distances
@@ -52,7 +56,7 @@ def fgm(
     teach_adversarial: bool = False,
     **kwargs,
 ) -> Tuple[np.ndarray, np.ndarray]:
-    classifier = SklearnClassifier(model=classifier.estimator)
+    classifier = ScikitlearnSVC(model=classifier.estimator)
     attack = FastGradientMethod(estimator=classifier, eps=0.2, **kwargs)
 
     adversarial_examples = attack.generate(X)
@@ -83,7 +87,7 @@ def deepfool(
     teach_adversarial: bool = False,
     **uncertainty_measure_kwargs,
 ) -> Tuple[np.ndarray, np.ndarray]:
-    classifier = SklearnClassifier(model=classifier.estimator, clip_values=clip_values)
+    classifier = ScikitlearnSVC(model=classifier.estimator, clip_values=clip_values)
     attack = DeepFool(classifier=classifier, verbose=verbose, batch_size=batch_size)
 
     adversarial_examples = attack.generate(X)
@@ -119,7 +123,7 @@ def adversarial(
     Optionally runs attacks in parallel.
     """
 
-    classifier = SklearnClassifier(
+    classifier = ScikitlearnSVC(
         model=classifier.estimator, clip_values=clip_values, use_logits=use_logits
     )
 
@@ -227,7 +231,7 @@ def comparative_density_margin(
     density = density / density.max()
 
     # Margin finding
-    classifier = SklearnClassifier(model=classifier.estimator, clip_values=clip_values)
+    classifier = ScikitlearnSVC(model=classifier.estimator, clip_values=clip_values)
     attack = FastGradientMethod(classifier, minimal=True)
 
     adversarial_examples = attack.generate(X_unlabelled)
@@ -264,7 +268,7 @@ def poison(
         X_training, y_training, test_size=0.5
     )
 
-    classifier = SklearnClassifier(model=classifier.estimator, clip_values=clip_values)
+    classifier = ScikitlearnSVC(model=classifier.estimator, clip_values=clip_values)
 
     # Select start points for the poisoning attack
     start_points_idx, start_points = point_selector(
@@ -427,3 +431,105 @@ def uncertainty_synthesis(
         )
 
     return (None, out, None, None, None, None)
+
+def halfspace_synthesis(
+    classifier: sklearn.base.BaseEstimator,
+    X: Union[list, np.ndarray],
+    X_training: np.ndarray,
+    y_training: np.ndarray,
+    *args,
+    n_instances: int = 1,
+    **kwargs,
+):
+    """
+    This implementation is ported from the official matlab implementation [1] and is hence
+    a derivative work. Licensing is unclear, however the source states:
+    
+    > The software below is for scientific purpose ONLY.
+    
+    [1](https://mine.kaust.edu.sa/Pages/Software.aspx)
+    """
+    # TODO: Change this if necessary to make use of warm start.
+    
+    y_training = (y_training - 0.5)*2
+    
+    assert(set(np.unique(y_training)) == {-1, 1})
+    
+    import cvxpy
+    import scipy
+    
+    d = X_training.shape[-1]
+    m = X_training.shape[0]
+    
+    s = cvxpy.Variable((d, 1))
+    u = cvxpy.Variable(d)
+    
+    objective = cvxpy.Maximize(cvxpy.geo_mean(s))
+    
+    constraints = [
+        cvxpy.diag(y_training) @ 
+        ( X_training @ u) 
+        >= 
+        cvxpy.norm(
+            cvxpy.multiply(
+                X_training,
+                (np.ones((m, 1))@cvxpy.transpose(s)),
+            ), 2, 1
+        ),
+        cvxpy.norm(u)<=1
+    ]
+    problem = cvxpy.Problem(objective, constraints)
+    
+    result = problem.solve(solver=cvxpy.MOSEK)
+
+    w_est = u.value
+        
+    S = np.diag(np.squeeze(s.value.T)) # the square root of the covariance matrix 
+    N = scipy.linalg.null_space(np.asmatrix(u.value.conj().T))
+    B = np.matmul(S, N)
+    B = np.matmul(B.conj().T, B)
+    
+    with warnings.catch_warnings():
+        warnings.filterwarnings('ignore', category=RuntimeWarning)
+        eigs = scipy.sparse.linalg.eigs(B, n_instances, which='LM')
+    
+    _, alph = eigs
+    X_next = (np.matmul(N, alph)).conj().T
+    assert(not np.iscomplex(X_next).all())
+    
+    X_next = np.real(X_next)
+
+    # expose w_est?
+    
+    return (None, X_next, None, None, None, None)
+
+
+__engine = None
+
+def halfspace_synthesis_matlab(
+    classifier: sklearn.base.BaseEstimator,
+    X: Union[list, np.ndarray],
+    X_training: np.ndarray,
+    y_training: np.ndarray,
+    *args,
+    n_instances: int = 1,
+    **kwargs,
+):
+    """
+    This function is licensed under GPLv2 the same as the rest of the repository, however it calls into ambiguously licensed code.
+    
+    See the documentation for `halfspace_synthesis` for details.
+    """
+    global __engine
+    
+    import matlab.engine
+    from matlab_ffi import as_matlab
+    
+    if __engine is None:
+        __engine = matlab.engine.start_matlab()
+
+    __engine.addpath(fr'{Path(__file__).resolve().parent}/matlab', nargout=0)
+    X_next, w_est = __engine.halfspace_query_synthesis(as_matlab(X_training), as_matlab((y_training-0.5)*2), n_instances, nargout=2)
+    
+    return (None, X_next, None, None, None, None)
+    

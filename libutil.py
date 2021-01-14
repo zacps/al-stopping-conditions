@@ -4,7 +4,7 @@ from joblib import Parallel
 from sklearn.metrics import accuracy_score, f1_score, roc_auc_score
 from tqdm.notebook import tqdm
 from art.metrics import empirical_robustness
-from art.estimators.classification import SklearnClassifier
+from art.estimators.classification.scikitlearn import ScikitlearnSVC
 
 
 class ProgressParallel(Parallel):
@@ -76,7 +76,7 @@ class Metrics:
                     )
             elif metric == empirical_robustness:
                 result[metric.__name__] = empirical_robustness(
-                    SklearnClassifier(clf), test_set, "fgsm", attack_params={"eps": 0.2}
+                    ScikitlearnSVC(clf), test_set, "fgsm", attack_params={"eps": 0.2}
                 )
             elif metric == "time":
                 result["time"] = t_elapsed
