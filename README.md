@@ -2,7 +2,7 @@
 
 This repository contains the code from a summer research project at the University of Auckland.
 
-The early draft of the report can be found [here](https://www.overleaf.com/read/yvghhwrnpvmk).
+An early draft of the report can be found [here](https://www.overleaf.com/read/yvghhwrnpvmk).
 
 ## Installation
 
