@@ -7,8 +7,6 @@ import matplotlib.patches as patches
 
 import numpy as np
 
-from secml.data.c_dataset import CDataset
-
 
 def make_meshgrid(x, y, h=0.02):
     """Create a mesh of points to plot in

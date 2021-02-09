@@ -1,6 +1,7 @@
 from functools import partial
 from pathlib import Path
 import warnings
+from typing import Union, Tuple, Callable, Optional
 
 import sklearn
 import numpy as np
@@ -11,16 +12,20 @@ from art.attacks.poisoning import PoisoningAttackSVM
 from sklearn.metrics.pairwise import paired_distances, euclidean_distances
 from sklearn.preprocessing import LabelEncoder
 from sklearn import preprocessing
-from typing import Union, Tuple, Callable
 from tqdm.auto import tqdm
 from sklearn.model_selection import train_test_split
+from joblib import Parallel, delayed
+from scipy.sparse import csr_matrix
 
-from secml.ml.classifiers.sklearn.c_classifier_svm import CClassifierSVM
-from secml.adv.attacks.poisoning import CAttackPoisoningSVM
-from secml.ml.kernels.c_kernel_linear import CKernelLinear
-from secml.data.c_dataset import CDataset
-from secml.data.data_utils import label_binarize_onehot
-from secml.array.c_array import CArray
+try:
+    from secml.ml.classifiers.sklearn.c_classifier_svm import CClassifierSVM
+    from secml.adv.attacks.poisoning import CAttackPoisoningSVM
+    from secml.ml.kernels.c_kernel_linear import CKernelLinear
+    from secml.data.c_dataset import CDataset
+    from secml.data.data_utils import label_binarize_onehot
+    from secml.array.c_array import CArray
+except ImportError:
+    pass
 
 
 def random_batch(
@@ -47,6 +52,49 @@ def uncertainty_id(clf, X, n_instances=1, **kwargs):
     )[:n_instances]
 
 
+def uncertainty_randomised(
+    clf,
+    X,
+    n_instances
+):
+    idx, _ = batch.uncertainty_batch_sampling(clf, X, n_instances*2)
+    
+    # -------------------------------------------------------------------------------------
+    # Differs from non randomised strategy in that we take the top 2*n_instances points and
+    # randomly pick n_instances of them.
+    idx = np.random.choice(idx, min(n_instances, len(idx)), replace=False)
+    # -------------------------------------------------------------------------------------
+
+    return idx, X[idx]
+
+
+def uncertainty_stop(
+    clf,
+    X,
+    n_instances,
+    metric = 'euclidean',
+    n_jobs=None,
+    **uncertainty_measure_kwargs,
+):
+    from modAL.batch import ranked_batch
+    from modAL.uncertainty import classifier_uncertainty, classifier_entropy
+    uncertainty = classifier_uncertainty(clf, X, **uncertainty_measure_kwargs)
+    entropy = classifier_entropy(clf, X, **uncertainty_measure_kwargs)
+    query_indices = ranked_batch(clf, unlabeled=X, uncertainty_scores=uncertainty,
+         n_instances=n_instances, metric=metric, n_jobs=n_jobs)
+    metrics = {
+        "uncertainty_average": np.mean(uncertainty),
+        "uncertainty_average_selected": np.mean(uncertainty[query_indices]),
+        "uncertainty_min": np.min(uncertainty),
+        "uncertainty_min_selected": np.min(uncertainty[query_indices]),
+        "uncertainty_max": np.max(uncertainty),
+        "uncertainty_max_selected": np.max(uncertainty[query_indices]),
+        "uncertainty_variance": np.var(uncertainty),
+        "uncertainty_variance_selected": np.var(uncertainty[query_indices]),
+        "entropy_max": np.max(entropy),
+    }
+    return query_indices, X[query_indices], metrics
+
 # deprecated
 def fgm(
     classifier: sklearn.base.BaseEstimator,
@@ -61,7 +109,6 @@ def fgm(
 
     adversarial_examples = attack.generate(X)
 
-    # TODO: I have no idea if this is the right way to rank them, it seems to be right intuitively but...
     dists = paired_distances(X, adversarial_examples, metric="euclidean")
 
     idx = np.argsort(dists)
@@ -92,7 +139,6 @@ def deepfool(
 
     adversarial_examples = attack.generate(X)
 
-    # TODO: I have no idea if this is the right way to rank them, it seems to be right intuitively but...
     dists = paired_distances(X, adversarial_examples, metric="euclidean")
 
     idx = np.argsort(dists)
@@ -115,6 +161,8 @@ def adversarial(
     teach_adversarial: bool = False,
     parallel_threads: int = 1,
     use_logits: bool = False,
+    log_metrics = None,
+    distance_metric: str = "euclidean",
     **attack_kwargs,
 ):
     """
@@ -123,24 +171,39 @@ def adversarial(
     Optionally runs attacks in parallel.
     """
 
-    classifier = ScikitlearnSVC(
-        model=classifier.estimator, clip_values=clip_values, use_logits=use_logits
-    )
+    try:
+        classifier = ScikitlearnSVC(
+            model=classifier.estimator, clip_values=clip_values, use_logits=use_logits
+        )
+    except TypeError:
+        # use_logits patch not yet merged
+        classifier = ScikitlearnSVC(
+            model=classifier.estimator, clip_values=clip_values
+        )
 
     attack = Attack(classifier, **attack_kwargs)
+    
+    if isinstance(X, csr_matrix):
+        X = X.toarray()
 
     if parallel_threads != 1:
         # *Should* be ordered, at least with the default backend
         # multiprocessing backend may not be ordered
         adversarial_examples = Parallel(n_jobs=parallel_threads)(
             delayed(attack.generate)(part)
-            for part in np.array_split(x, parallel_threads)
+            for part in np.array_split(X, parallel_threads)
         )
         adversarial_examples = np.array(adversarial_examples).reshape(-1, X.shape[-1])
     else:
         adversarial_examples = attack.generate(X)
 
-    dists = paired_distances(X, adversarial_examples, metric="euclidean")
+    # TODO: Investigate performance of different distance metrics
+    dists = paired_distances(X, adversarial_examples, metric=distance_metric)
+    
+    if log_metrics is not None:
+        met = [np.min(dists), np.mean(dists), np.max(dists)]
+        print(met)
+        log_metrics.write(str(met)+"\n")
 
     idx = np.argsort(dists)
 
@@ -152,6 +215,91 @@ def adversarial(
 
     return result
 
+
+def adversarial_randomised(
+    classifier: sklearn.base.BaseEstimator,
+    X: Union[list, np.ndarray],
+    Attack,
+    n_instances: int = 1,
+    clip_values: Tuple[int, int] = None,
+    teach_adversarial: bool = False,
+    parallel_threads: int = 1,
+    use_logits: bool = False,
+    **attack_kwargs,
+):
+    """
+    Generic adversarial margin-based pool active learning query strategy.
+
+    Optionally runs attacks in parallel.
+    """
+
+    try:
+        classifier = ScikitlearnSVC(
+            model=classifier.estimator, clip_values=clip_values, use_logits=use_logits
+        )
+    except TypeError:
+        # use_logits patch not yet merged
+        classifier = ScikitlearnSVC(
+            model=classifier.estimator, clip_values=clip_values
+        )
+
+    attack = Attack(classifier, **attack_kwargs)
+
+    if parallel_threads != 1:
+        # *Should* be ordered, at least with the default backend
+        # multiprocessing backend may not be ordered
+        adversarial_examples = np.array(Parallel(n_jobs=parallel_threads)(
+            delayed(attack.generate)(part)
+            for part in np.array_split(X, parallel_threads)
+        ))
+        print("type ", type(adversarial_examples[0]))
+        adversarial_examples = adversarial_examples.reshape(-1, X.shape[-1])
+    else:
+        adversarial_examples = attack.generate(X)
+
+    dists = paired_distances(X, adversarial_examples, metric="euclidean")
+
+    idx = np.argsort(dists)
+    
+    # -------------------------------------------------------------------------------------
+    # Differs from non randomised strategy in that we take the top 2*n_instances points and
+    # randomly pick n_instances of them.
+    idx = np.random.choice(idx[:min(2*n_instances, len(idx))], min(n_instances, 2*n_instances, len(idx)), replace=False)
+    # -------------------------------------------------------------------------------------
+
+    # This is kind of a hack, modAL is not built to deal with passing extra information.
+    result = (
+        idx,
+        adversarial_examples[idx] if teach_adversarial else None,
+    )
+
+    return result
+
+def adversarial_batch_sampling(classifier,
+                               X: Union[np.ndarray],
+                               Attack: Callable,
+                               n_instances: int = 20,
+                               metric: Union[str, Callable] = 'euclidean',
+                               n_jobs: Optional[int] = None,
+                               clip_values = None
+                               ) -> np.ndarray:
+    from modAL.batch import ranked_batch
+    
+    aclassifier = ScikitlearnSVC(
+        model=classifier.estimator, clip_values=clip_values
+    )
+
+    attack = Attack(aclassifier)
+
+    adversarial_examples = attack.generate(X)
+
+    # TODO: Investigate performance of different distance metrics
+    dists = paired_distances(X, adversarial_examples, metric="euclidean")
+
+    norm_dists = 1-dists/np.max(dists)
+    
+    return ranked_batch(classifier, unlabeled=X, uncertainty_scores=norm_dists,
+                                 n_instances=n_instances, metric=metric, n_jobs=n_jobs)
 
 def density(
     classifier: sklearn.base.BaseEstimator,

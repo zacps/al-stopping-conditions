@@ -1,6 +1,8 @@
 import os
 import io
 import itertools
+import math
+import pickle
 from collections import defaultdict
 from dataclasses import dataclass
 from typing import Dict, Any, Callable
@@ -19,21 +21,9 @@ from libadversarial import random_batch
 from modAL import batch
 from sklearn.metrics import accuracy_score, f1_score, roc_auc_score
 from sklearn import metrics as skmetrics
+from sklearn.utils import check_random_state
 from art.metrics import empirical_robustness
 from tabulate import tabulate
-
-DEFAULT_MATRIX = {
-    # Dataset fetchers should cache if possible
-    "datasets": [("syntheic", "generateData_twoPills_2D"), ("car", lambda: "car")],
-    "dataset_mutators": {
-        "none": (lambda x: x),
-    },
-    "methods": [
-        ("random", partial(random_batch, n_instances=10)),
-        ("uncertainty", partial(batch.uncertainty_batch_sampling, n_instances=10)),
-    ],
-    "meta": {"dataset_size": 1000, "labelled_size": 0.1, "n_runs": 10},
-}
 
 
 @dataclass
@@ -41,13 +31,18 @@ class Config:
     dataset_name: str
     method_name: str
     dataset_mutator_name: str
+    model_name: str
     meta: Dict["str", Any]
     method: Callable = None
     dataset: Callable = None
     dataset_mutator: Callable = None
 
     def serialize(self):
-        meta_str = "__".join([f"{k}={v}" for k, v in self.meta.items()])
+        meta_str = "__".join([f"{k}={v}" if k != "stop_function" else f"{k}={v[0]}" for k, v in self.meta.items()])
+        return f"{self.dataset_name}__{self.dataset_mutator_name}__{self.method_name}__{self.model_name}__{meta_str}"
+    
+    def serialize_no_model(self):
+        meta_str = "__".join([f"{k}={v}" if k != "stop_function" else f"{k}={v[0]}" for k, v in self.meta.items()])
         return f"{self.dataset_name}__{self.dataset_mutator_name}__{self.method_name}__{meta_str}"
 
     def json(self):
@@ -55,7 +50,8 @@ class Config:
             "dataset_name": self.dataset_name,
             "method_name": self.method_name,
             "dataset_mutator_name": self.dataset_mutator_name,
-            "meta": self.meta,
+            "model_name": self.model_name,
+            "meta": {k: v if k != "stop_function" else v[0] for k, v in self.meta.items()},
         }
 
 
@@ -66,18 +62,20 @@ class Configurations:
 
         for dataset in matrix["datasets"]:
             for method in matrix["methods"]:
-                for dataset_mutator in matrix["dataset_mutators"].items():
-                    self.configurations.append(
-                        Config(
-                            dataset_name=dataset[0],
-                            dataset=dataset[1],
-                            method_name=method[0],
-                            method=method[1],
-                            dataset_mutator_name=dataset_mutator[0],
-                            dataset_mutator=dataset_mutator[1],
-                            meta=matrix["meta"],
+                for model in matrix["models"]:
+                    for dataset_mutator in matrix["dataset_mutators"].items():
+                        self.configurations.append(
+                            Config(
+                                dataset_name=dataset[0],
+                                dataset=dataset[1],
+                                method_name=method[0],
+                                method=method[1],
+                                dataset_mutator_name=dataset_mutator[0],
+                                dataset_mutator=dataset_mutator[1],
+                                model_name=model,
+                                meta=matrix["meta"],
+                            )
                         )
-                    )
 
     def __iter__(self, *args, **kwargs):
         return self.configurations.__iter__(*args, **kwargs)
@@ -87,13 +85,15 @@ class Configurations:
 
 
 def run(
-    matrix=DEFAULT_MATRIX,
+    matrix,
     force_cache=False,
     force_run=False,
     backend="loky",
     abort=True,
     workers=None,
+    metrics=None
 ):
+    __progress_hack()
     configurations = Configurations(matrix)
 
     if workers is None:
@@ -102,14 +102,14 @@ def run(
             workers = len(os.sched_getaffinity(0))
 
     results = ProgressParallel(
-        n_jobs=workers // configurations.meta["n_runs"],
+        n_jobs=math.ceil(workers / configurations.meta["n_runs"]),
         total=len(configurations),
         desc=f"Experiment",
         leave=False,
         backend=backend,
     )(
         delayed(__run_inner)(
-            config, force_cache=force_cache, force_run=force_run, abort=abort
+            config, force_cache=force_cache, force_run=force_run, abort=abort, metrics_measures=metrics
         )
         for config in configurations
     )
@@ -117,66 +117,93 @@ def run(
     return results
 
 
-def plot(results, plot_robustness=False):
-    key = lambda config_result: (
-        config_result[0].dataset_name,
-        config_result[0].dataset_mutator_name,
-    )
-    results = sorted(results, key=key)
+def plot(results, plot_robustness=False, key=None, series=None, title=None, ret=False, sort=True, figsize=(18,4), extra=0):
+    if key is None:
+        key = lambda config_result: (
+            config_result[0].dataset_name,
+            config_result[0].dataset_mutator_name,
+            getattr(config_result[0], "model_name", None),
+        )
+    if series is None:
+        series = lambda config: config.method_name
+    if title is None:
+        title = lambda config: f"{config.dataset_name} {config.model_name}"
+    if sort:
+        results = sorted(results, key=key)
     groups = groupby(results, key)
+    figaxes = []
     for k, group in groups:
-        fig, axes = plt.subplots(1, 4 if plot_robustness else 3, figsize=(18, 4))
+        fig, axes = plt.subplots(1, (4 if plot_robustness else 3)+extra, figsize=figsize)
+        figaxes.append((fig, axes))
 
         for config, result in group:
-            for i, ax in enumerate(axes.flatten()):
+            for i, ax in enumerate(axes.flatten()[:-extra if extra != 0 else len(axes.flatten())]):
+                try:
+                    i_stderr = result.columns.get_loc("accuracy_score_stderr")
+                    has_stderr = True
+                except KeyError:
+                    has_stderr = False
                 if len(result["x"] > 100):
                     ax.plot(
                         result["x"],
                         result.iloc[:, 1 + i],
                         "-",
-                        label=f"{config.method_name}" if i == 0 else "",
+                        label=f"{series(config)}" if i == 0 else "",
                     )
-                    ax.fill_between(
-                        result["x"],
-                        result.iloc[:, 1 + i] - result.iloc[:, 5 + i],
-                        result.iloc[:, 1 + i] + result.iloc[:, 5 + i],
-                        color="grey",
-                        alpha=0.2,
-                    )
+                    if has_stderr:
+                        ax.fill_between(
+                            result["x"],
+                            result.iloc[:, 1 + i] - result.iloc[:, i_stderr + i],
+                            result.iloc[:, 1 + i] + result.iloc[:, i_stderr + i],
+                            color="grey",
+                            alpha=0.2,
+                        )
                 else:
                     ax.errorbar(
                         result["x"],
                         result.iloc[:, 1 + i],
-                        yerr=result.iloc[:, 5 + i],
-                        label=f"{config.method_name}" if i == 0 else "",
+                        yerr=result.iloc[:, i_stderr + i] if has_stderr else None,
+                        label=f"{series(config)}" if i == 0 else "",
                     )
                 ax.set_xlabel("Instances")
                 ax.set_ylabel(["Accuracy", "F1", "AUC ROC", "Empirical Robustness"][i])
-                plt.suptitle(f"{config.dataset_name}")
+                plt.suptitle(title(config))
 
         fig.legend()
+    if ret:
+        return figaxes
 
 
 def table(results, tablefmt="fancy_grid"):
     key = lambda config_result: (
         config_result[0].dataset_name,
         config_result[0].dataset_mutator_name,
+        getattr(config_result[0], "model_name", None),
     )
     results = sorted(results, key=key)
     groups = groupby(results, key)
 
-    def func(result):
+    def max_at(result, has_err, metric):
         try:
-            return int(
-                result[result["accuracy_score"].gt(result["accuracy_score"].iloc[-1])]
-                .iloc[0]
-                .x
-            )
+            upper = result[metric]+result[f"{metric}_stderr"]
+            norm = result[result[metric].ge(result[metric].iloc[-1])].iloc[0].x
+            return f"{norm:.0f}" + f"±{abs(result[upper.ge(result[metric].iloc[-1])].iloc[0].x-norm):.0f}" if has_err else ""
         except IndexError:
             return "-"
+        
+    def area_under(result, has_err, metric, baseline=1):
+        return f"{skmetrics.auc(result['x'], result[metric])/baseline:.4f}" + (
+            f"±{(skmetrics.auc(result['x'], result[metric]+result[metric+'_stderr'])-skmetrics.auc(result['x'], result[metric]))/baseline:.0g}"
+            if has_err
+            else ""
+        )
+    def baseline(group, metric):
+        return next((skmetrics.auc(result['x'], result[metric]) for conf, result in group if conf.method_name == "random"), 1)
 
     for k, group in groups:
-        has_err = not math.isnan(results[0][1].iloc[:, 5][0])
+        has_err = not math.isnan(results[0][1].accuracy_score_stderr[0])
+        
+        group = list(group)
         print(k[0])
         print(
             tabulate(
@@ -184,50 +211,66 @@ def table(results, tablefmt="fancy_grid"):
                     [
                         [
                             conf.method_name,
-                            f"{skmetrics.auc(result['x'], result.iloc[:,1]):.2f}"
-                            + (
-                                f"±{skmetrics.auc(result['x'], result.iloc[:,1]+result.iloc[:,5])}"
-                                if has_err
-                                else ""
-                            ),
-                            f"{skmetrics.auc(result['x'], result.iloc[:,2]):.2f}"
-                            + (
-                                f"±{skmetrics.auc(result['x'], result.iloc[:,2]+result.iloc[:,6])}"
-                                if has_err
-                                else ""
-                            ),
-                            f"{skmetrics.auc(result['x'], result.iloc[:,3]):.2f}"
-                            + (
-                                f"±{skmetrics.auc(result['x'], result.iloc[:,3]+result.iloc[:,7])}"
-                                if has_err
-                                else ""
-                            ),
-                            func(result),
+                            area_under(result, has_err, "accuracy_score", baseline=baseline(group, "accuracy_score")),
+                            area_under(result, has_err, "f1_score", baseline=baseline(group, "f1_score")),
+                            area_under(result, has_err, "roc_auc_score", baseline=baseline(group, "roc_auc_score")),
+                            max_at(result, has_err, "accuracy_score"),
+                            max_at(result, has_err, "roc_auc_score"),
+                            result.time.sum() if 'time' in result else None
                         ]
                         for conf, result in group
                     ],
                     key=lambda x: -float(x[1].split("±")[0]),
                 ),
                 tablefmt=tablefmt,
-                headers=["method", "AUC LAC", "AUC LF1C", "AUC AUC ROC", "max % @"],
+                headers=["method", "AUC LAC", "AUC LF1C", "AUC AUC ROC", "Instances to max accuracy", "Instances to max AUC ROC", "Time"],
             )
         )
 
 
-def __run_inner(config, force_cache=False, force_run=False, backend="loky", abort=None):
+def __run_inner(config, force_cache=False, force_run=False, backend="loky", abort=None, metrics_measures=None):
+    if metrics_measures is None:
+        metrics_measures = [
+            accuracy_score,
+            f1_score,
+            roc_auc_score,
+            empirical_robustness,
+            "time"
+        ]
+    
     try:
-        cached_config, metrics = __read_result(f"cache/{config.serialize()}.csv")
+        try:
+            cached_config, metrics = __read_result(f"cache/{config.serialize()}.csv")
+            if config.meta.get("ret_classifiers"):
+                classifiers = __read_classifiers(config)
+        except FileNotFoundError as e:
+            if config.model_name == None or config.model_name == "svm-linear":
+                cached_config, metrics = __read_result(f"cache/{config.serialize_no_model()}.csv")
+                cached_config.model_name = "svm-linear"
+            else:
+                raise e
         if force_run:
             raise FileNotFoundError()
-        return (cached_config, metrics)
+        if not config.meta.get("ret_classifiers", False):
+            return (cached_config, metrics)
+        else:
+            return ((cached_config, metrics), classifiers)
 
-    except FileNotFoundError:
+    except (FileNotFoundError, EOFError):
         if force_cache:
             raise Exception(f"Cache file 'cache/{config.serialize()}.csv' not found")
+            
+        workers = os.cpu_count()
+        if "sched_getaffinity" in dir(os):
+            workers = len(os.sched_getaffinity(0))
 
         try:
-            metrics = ProgressParallel(
-                n_jobs=config.meta["n_runs"],
+            # Seed a random state generator. This seed is constant between methods/datasets/models so comparisons can be made with fewer runs.
+            # It is however *variant* with each run.
+            random_state = check_random_state(42)
+            
+            metrics_classifiers = ProgressParallel(
+                n_jobs=min(config.meta["n_runs"], workers),
                 total=config.meta["n_runs"],
                 desc=f"Run",
                 leave=False,
@@ -235,21 +278,31 @@ def __run_inner(config, force_cache=False, force_run=False, backend="loky", abor
             )(
                 delayed(
                     lambda dataset, method: MyActiveLearner(
-                        metrics=[
-                            accuracy_score,
-                            f1_score,
-                            roc_auc_score,
-                            empirical_robustness,
-                        ]
+                        metrics=metrics_measures
                     ).active_learn2(
+                        # It's important that the split is re-randomised per run.
                         *active_split(
-                            *dataset, labeled_size=config.meta["labelled_size"]
+                            *dataset, 
+                            labeled_size=config.meta.get("labelled_size", 0.1), 
+                            test_size=config.meta.get("test_size", 0.5), 
+                            ensure_y=config.meta.get("ensure_y", False), 
+                            random_state=random_state,
+                            mutator=config.dataset_mutator,
+                            config_str=config.serialize(),
+                            i=i
                         ),
                         method,
+                        model=config.model_name.lower(),
+                        ret_classifiers=config.meta.get("ret_classifiers", False),
+                        stop_info=config.meta.get("stop_info", False),
+                        stop_function=config.meta.get("stop_function", ("default", lambda learner: False))[1],
                     )
                 )(config.dataset(), config.method)
-                for _ in range(config.meta["n_runs"])
+                for i in range(config.meta["n_runs"])
             )
+            metrics = [mc[0] for mc in metrics_classifiers]
+            classifiers = [mc[1] for mc in metrics_classifiers]
+            
         except Exception as e:
             if abort:
                 raise e
@@ -257,8 +310,13 @@ def __run_inner(config, force_cache=False, force_run=False, backend="loky", abor
             return (config, None)
         metrics = metrics[0].average2(metrics[1:])
         __write_result(config, metrics)
+        if config.meta.get("ret_classifiers", False):
+            __write_classifiers(config, classifiers)
 
-    return (config, metrics)
+    if not config.meta.get("ret_classifiers", False):
+        return (config, metrics)
+    else:
+        return ((config, metrics), classifiers)
 
 
 def __write_result(config, result):
@@ -267,11 +325,21 @@ def __write_result(config, result):
         json.dump(config.json(), f)
         f.write("\n")
         result.to_csv(f)
-
+        
+        
+def __write_classifiers(config, classifiers):
+    file = f"cache/classifiers/{config.serialize()}.pickle"
+    with open(file, "wb") as f:
+        pickle.dump(classifiers, f)
+        
+def __read_classifiers(config):
+    file = f"cache/classifiers/{config.serialize()}.pickle"
+    with open(file, "rb") as f:
+        return pickle.load(f)
 
 def __read_result(file):
     with open(file, "r") as f:
-        config = Config(**json.loads(f.readline()))
+        config = Config(**{"model_name": "svm-linear", **json.loads(f.readline())})
         result = pd.read_csv(f, index_col=0)
     return (config, result)
 

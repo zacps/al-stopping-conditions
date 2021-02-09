@@ -1,5 +1,6 @@
 from typing import Tuple, Union, Callable
 import time
+from copy import deepcopy
 
 import matplotlib.pyplot as plt
 from matplotlib.patches import ConnectionPatch
@@ -13,6 +14,16 @@ from sklearn.gaussian_process import GaussianProcessClassifier
 from sklearn.linear_model import LogisticRegression
 from sklearn.metrics import accuracy_score, f1_score, roc_auc_score
 from sklearn.model_selection import train_test_split
+from joblib import Parallel, delayed
+from scipy.sparse import csr_matrix
+from sklearn.ensemble import RandomForestClassifier
+from sklearn.naive_bayes import GaussianNB
+from sklearn.neighbors import KNeighborsClassifier
+from sklearn.linear_model import Perceptron
+from sklearn.base import clone
+from modAL.utils.data import data_vstack
+from modAL.utils.selection import multi_argmax
+from modAL.uncertainty import _proba_uncertainty, _proba_entropy, classifier_uncertainty
 
 from libadversarial import fgm, deepfool
 from libplot import plot_classification, plot_poison, c_plot_poison
@@ -28,7 +39,7 @@ except Exception:
     print("Using sklearn")
 
 
-def active_split(X, Y, test_size=0.5, labeled_size=0.1, shuffle=True):
+def active_split(X, Y, test_size=0.5, labeled_size=0.1, shuffle=True, ensure_y=False, random_state=None, mutator=lambda *args: args, config_str=None, i=None):
     """
     Split data into three sets:
     * Labeled training set (0.1)
@@ -37,20 +48,30 @@ def active_split(X, Y, test_size=0.5, labeled_size=0.1, shuffle=True):
     """
 
     X_train, X_test, Y_train, Y_test = train_test_split(
-        X, Y, test_size=test_size, shuffle=shuffle, random_state=42
+        X, Y, test_size=test_size, shuffle=shuffle, random_state=random_state
     )
+    X_train, Y_train = mutator(X_train, Y_train, rand=random_state, config_str=config_str, i=i)
     X_labelled, X_unlabelled, Y_labelled, Y_oracle = train_test_split(
         X_train,
         Y_train,
         test_size=(1 - labeled_size / test_size),
         shuffle=shuffle,
-        random_state=42,
+        random_state=random_state,
     )
+    # ensure a label for both (assumed binary) classes made it in to the initial train and validation sets
+    if ensure_y:
+        for klass in np.unique(Y):
+            if klass not in Y_labelled:
+                idx = np.where(Y_oracle==klass)[0][0]
+                Y_labelled = np.concatenate((Y_labelled, [Y_oracle[idx]]), axis=0)
+                X_labelled = np.concatenate((X_labelled, [X_unlabelled[idx]]), axis=0)
+                Y_oracle = np.delete(Y_oracle, idx, axis=0)
+                X_unlabelled = np.delete(X_unlabelled, idx, axis=0)
 
     return X_labelled, X_unlabelled, Y_labelled, Y_oracle, X_test, Y_test
 
 
-def active_split_query_synthesis(X, Y, test_size=0.5, labeled_size=0.1, shuffle=True):
+def active_split_query_synthesis(X, Y, test_size=0.5, labeled_size=0.1, shuffle=True, random_state=None):
     """
     Split data into three sets:
     * Labeled training set (0.1)
@@ -59,180 +80,17 @@ def active_split_query_synthesis(X, Y, test_size=0.5, labeled_size=0.1, shuffle=
     """
 
     X_train, X_test, Y_train, Y_test = train_test_split(
-        X, Y, test_size=test_size, shuffle=shuffle, random_state=42
+        X, Y, test_size=test_size, shuffle=shuffle, random_state=random_state
     )
     X_labelled, X_unlabelled, Y_labelled, Y_oracle = train_test_split(
         X_train,
         Y_train,
         test_size=(1 - labeled_size / test_size),
         shuffle=shuffle,
-        random_state=42,
+        random_state=random_state,
     )
 
     return X_labelled, X_unlabelled, Y_labelled, Y_oracle, X_test, Y_test
-
-
-def active_learn(
-    X_labelled,
-    X_unlabelled,
-    Y_labelled,
-    Y_oracle,
-    X_test,
-    Y_test,
-    query_strategy,
-    model="svm-linear",
-    teach_advesarial=False,
-) -> Tuple[list, list]:
-    """
-    Perform active learning on the given dataset using a linear SVM model, querying data with the given query strategy.
-
-    Returns the accuracy curve.
-    """
-
-    if model == "svm-linear":
-        learner = ActiveLearner(
-            estimator=SVC(kernel="linear", probability=True),
-            X_training=X_labelled,
-            y_training=Y_labelled,
-            query_strategy=query_strategy,
-        )
-    elif model == "committee":
-        learner = Committee(
-            learner_list=[
-                ActiveLearner(
-                    estimator=SVC(kernel="linear", probability=True),
-                    X_training=X_labelled,
-                    y_training=Y_labelled,
-                ),
-                # committee: logistic regression, svm-linear, svm-rbf, guassian process classifier
-                ActiveLearner(
-                    estimator=SVC(kernel="rbf", probability=True),
-                    X_training=X_labelled,
-                    y_training=Y_labelled,
-                ),
-                ActiveLearner(
-                    estimator=GaussianProcessClassifier(),
-                    X_training=X_labelled,
-                    y_training=Y_labelled,
-                ),
-                ActiveLearner(
-                    estimator=LogisticRegression(),
-                    X_training=X_labelled,
-                    y_training=Y_labelled,
-                ),
-            ],
-            query_strategy=disagreement.vote_entropy_sampling,
-        )
-    else:
-        raise Exception("unknown model")
-
-    trained = [len(X_labelled)]
-    accuracy = [accuracy_score(Y_test, learner.estimator.predict(X_test))]
-    f1 = [f1_score(Y_test, learner.estimator.predict(X_test))]
-    roc_auc = [roc_auc_score(Y_test, learner.estimator.decision_function(X_test))]
-
-    while len(X_unlabelled) != 0:
-        if query_strategy == fgm:
-            query_idx, advesarial_examples = learner.query(X_unlabelled)
-
-            learner.teach(X_unlabelled[query_idx], Y_oracle[query_idx])
-            if teach_advesarial:
-                learner.teach(advesarial_examples, Y_oracle[query_idx])
-        else:
-            query_idx, _ = learner.query(X_unlabelled)
-            learner.teach(X_unlabelled[query_idx], Y_oracle[query_idx])
-
-        X_unlabelled = np.delete(X_unlabelled, query_idx, axis=0)
-        Y_oracle = np.delete(Y_oracle, query_idx, axis=0)
-
-        trained.append(trained[-1] + len(query_idx))
-
-        accuracy.append(accuracy_score(Y_test, learner.estimator.predict(X_test)))
-        f1.append(f1_score(Y_test, learner.estimator.predict(X_test)))
-        roc_auc.append(
-            roc_auc_score(Y_test, learner.estimator.decision_function(X_test))
-        )
-
-    return (trained, accuracy, f1, roc_auc)
-
-
-def active_learn2(
-    X_labelled,
-    X_unlabelled,
-    Y_labelled,
-    Y_oracle,
-    X_test,
-    Y_test,
-    query_strategy,
-    model="svm-linear",
-    teach_advesarial=False,
-    stop_function=lambda learner: False,
-) -> Tuple[list, list]:
-    """
-    Perform active learning on the given dataset using a linear SVM model, querying data with the given query strategy.
-
-    Returns the accuracy curve.
-    """
-
-    if model == "svm-linear":
-        learner = ActiveLearner(
-            estimator=SVC(kernel="linear", probability=True),
-            X_training=X_labelled,
-            y_training=Y_labelled,
-            query_strategy=query_strategy,
-        )
-    elif model == "committee":
-        learner = Committee(
-            learner_list=[
-                ActiveLearner(
-                    estimator=SVC(kernel="linear", probability=True),
-                    X_training=X_labelled,
-                    y_training=Y_labelled,
-                ),
-                # committee: logistic regression, svm-linear, svm-rbf, guassian process classifier
-                ActiveLearner(
-                    estimator=SVC(kernel="rbf", probability=True),
-                    X_training=X_labelled,
-                    y_training=Y_labelled,
-                ),
-                ActiveLearner(
-                    estimator=GaussianProcessClassifier(),
-                    X_training=X_labelled,
-                    y_training=Y_labelled,
-                ),
-                ActiveLearner(
-                    estimator=LogisticRegression(),
-                    X_training=X_labelled,
-                    y_training=Y_labelled,
-                ),
-            ],
-            query_strategy=disagreement.vote_entropy_sampling,
-        )
-    else:
-        raise Exception("unknown model")
-
-    metrics = Metrics()
-    metrics.collect(len(X_labelled), learner.estimator, Y_test, X_test)
-
-    while len(X_unlabelled) != 0 and not stop_function(learner):
-        if query_strategy == fgm:
-            query_idx, advesarial_examples = learner.query(X_unlabelled)
-
-            learner.teach(X_unlabelled[query_idx], Y_oracle[query_idx])
-            if teach_advesarial:
-                learner.teach(advesarial_examples, Y_oracle[query_idx])
-        else:
-            query_idx, _ = learner.query(X_unlabelled)
-            learner.teach(X_unlabelled[query_idx], Y_oracle[query_idx])
-
-        X_unlabelled = np.delete(X_unlabelled, query_idx, axis=0)
-        Y_oracle = np.delete(Y_oracle, query_idx, axis=0)
-
-        metrics.collect(
-            metrics.frame.x.iloc[-1] + len(query_idx), learner.estimator, Y_test, X_test
-        )
-
-    return metrics
 
 
 class MyActiveLearner:
@@ -278,6 +136,34 @@ class MyActiveLearner:
         elif model == "svm-poly":
             return ActiveLearner(
                 estimator=SVC(kernel="poly", probability=True),
+                X_training=X_labelled,
+                y_training=Y_labelled,
+                query_strategy=query_strategy,
+            )
+        elif model == "random-forest":
+            return ActiveLearner(
+                estimator=RandomForestClassifier(),
+                X_training=X_labelled,
+                y_training=Y_labelled,
+                query_strategy=query_strategy,
+            )
+        elif model == "gaussian-nb":
+            return ActiveLearner(
+                estimator=GaussianNB(),
+                X_training=X_labelled,
+                y_training=Y_labelled,
+                query_strategy=query_strategy,
+            )
+        elif model == "k-neighbors":
+            return ActiveLearner(
+                estimator=KNeighborsClassifier(),
+                X_training=X_labelled,
+                y_training=Y_labelled,
+                query_strategy=query_strategy,
+            )
+        elif model == "perceptron":
+            return ActiveLearner(
+                estimator=Perceptron(),
                 X_training=X_labelled,
                 y_training=Y_labelled,
                 query_strategy=query_strategy,
@@ -419,43 +305,59 @@ class MyActiveLearner:
         model="svm-linear",
         teach_advesarial=False,
         stop_function=lambda learner: False,
+        ret_classifiers=False,
+        stop_info=False
     ) -> Tuple[list, list]:
         """
-        Perform active learning on the given dataset using a linear SVM model, querying data with the given query strategy.
+        Perform active learning on the given dataset, querying data with the given query strategy.
 
-        Returns the accuracy curve.
+        Returns metrics describing the performance of the query strategy, and optionally all classifiers trained during learning.
         """
 
-        # Take a subset if the unlabelled set size is too large
-        if X_unlabelled.shape[0] > 1000:
-            print("INFO: Using sample of unlabelled set")
-            rng = np.random.default_rng()
-            idx = rng.choice(X_unlabelled.shape[0], 1000, replace=False)
-            X_unlabelled = X_unlabelled[idx]
-            Y_oracle = Y_oracle[idx]
-
         learner = self.__setup_learner(
-            X_labelled, Y_labelled, query_strategy, model="svm-linear"
+            X_labelled, Y_labelled, query_strategy, model=model
         )
+        
+        classifiers = []
+        
+        if ret_classifiers:
+            classifiers.append(deepcopy(learner))
 
-        self.metrics.collect(len(X_labelled), learner.estimator, Y_test, X_test)
+        self.metrics.collect(X_labelled.shape[0], learner.estimator, Y_test, X_test)
 
         if self.animate:
             self.__animation_frame(learner, X_unlabelled)
 
-        while len(X_unlabelled) != 0 and not stop_function(learner):
+        while X_unlabelled.shape[0] != 0 and not stop_function(learner):
             t_start = time.monotonic()
-            query_idx, query_points = learner.query(X_unlabelled)
+            if not stop_info:
+                query_idx, query_points = learner.query(X_unlabelled)
+                extra_metrics = {}
+            else:
+                query_idx, query_points, extra_metrics = learner.query(X_unlabelled)
             t_elapsed = time.monotonic() - t_start
+            
+            if "expected_error" in self.metrics.metrics:
+                extra_metrics['expected_error'] = expected_error(learner, X_unlabelled)
+            if "contradictory_information" in self.metrics.metrics:
+                # https://stackoverflow.com/questions/32074239/sklearn-getting-distance-of-each-point-from-decision-boundary
+                predictions = learner.predict(query_points)
+                uncertainties = classifier_uncertainty(learner.estimator, query_points)
 
-            if query_points is not None and (
-                query_strategy == fgm or query_strategy == deepfool
-            ):
+            if query_points is not None and getattr(query_strategy, "is_adversarial", False):
                 learner.teach(query_points, Y_oracle[query_idx])
 
             learner.teach(X_unlabelled[query_idx], Y_oracle[query_idx])
+            
+            if "contradictory_information" in self.metrics.metrics:
+                contradictory_information = np.sum(uncertainties[predictions != Y_oracle[query_idx]]/np.mean(uncertainties))
+                extra_metrics['contradictory_information'] = contradictory_information
 
-            X_unlabelled = np.delete(X_unlabelled, query_idx, axis=0)
+            if isinstance(X_unlabelled, csr_matrix):
+                X_unlabelled = delete_from_csr(X_unlabelled, row_indices=query_idx)
+            else:
+                X_unlabelled = np.delete(X_unlabelled, query_idx, axis=0)
+                
             Y_oracle = np.delete(Y_oracle, query_idx, axis=0)
 
             self.metrics.collect(
@@ -463,12 +365,17 @@ class MyActiveLearner:
                 learner.estimator,
                 Y_test,
                 X_test,
-                t_elapsed=t_elapsed,
+                time=t_elapsed,
+                X_unlabelled=X_unlabelled,
+                **extra_metrics
             )
 
             if self.animate:
                 self.__animation_frame(learner, X_unlabelled)
-
+                
+            if ret_classifiers:
+                classifiers.append(deepcopy(learner))
+                
         if self.animate:
             animation = self.cam.animate(interval=500, repeat_delay=1000)
             if self.animation_file is not None:
@@ -476,7 +383,10 @@ class MyActiveLearner:
             display(HTML(animation.to_html5_video()))
             plt.close(self.fig)
 
-        return self.metrics
+        if not ret_classifiers:
+            return (self.metrics, None)
+        else:
+            return (self.metrics, classifiers)
 
     def active_learn_query_synthesis(
         self,
@@ -587,65 +497,157 @@ class MyActiveLearner:
 
         return self.metrics
 
+    
+class BeamClf:
+    def __init__(self, X_labelled, y_labelled, X_unlabelled, y_unlabelled, X_test, y_test):
+        self._ = SVC(kernel='linear', probability=True)
+        self._.fit(X_labelled, y_labelled)
+        self.X = X_labelled
+        self.y = y_labelled
+        self.X_unlabelled = X_unlabelled
+        self.y_unlabelled = y_unlabelled
+        self.X_test = X_test
+        self.y_test = y_test
+        self.metrics = Metrics()
+        self.metrics.collect(len(self.X), self._, self.y_test, self.X_test)
+        
+    def teach(self, idx):
+        self.X = np.concatenate((self.X, [self.X_unlabelled[idx]]), axis=0)
+        self.y = np.concatenate((self.y, [self.y_unlabelled[idx]]), axis=0)
+        self.X_unlabelled = np.delete(self.X_unlabelled, idx, axis=0)
+        self.y_unlabelled = np.delete(self.y_unlabelled, idx, axis=0)
+        
+        self._.fit(self.X, self.y)
+        self.metrics.collect(len(self.X), self._, self.y_test, self.X_test)
+        
+    def done(self):
+        return len(self.X_unlabelled) == 0
 
-def beam_search(
+def beam_search2(
     X_labelled,
     X_unlabelled,
-    Y_labelled,
-    Y_oracle,
+    y_labelled,
+    y_unlabelled,
     X_test,
-    Y_test,
+    y_test,
+    workers: int = 1,
+    beam_width: int = 5,
+    metric: str = "accuracy_score"
 ):
-    scores = []
-    for x_idx, x in enumerate(X_unlabelled):
-        clf = SVC(kernel="linear")
-        clf.fit(X_labelled + x, Y_labelled + Y_oracle[x_idx])
-        scores.append(accuracy_score(Y_test, clf.predict(X_test)))
-    best_idx = np.argsort(scores)[:5]
-    best = X_unlabelled[best_idx]
+    """
+    Perform beam-search on the split dataset. 
+    
+    This should generate a best-guess at the optimal active learning sequence for a dataset.
+    """
+    classifiers = [BeamClf(X_labelled, y_labelled, X_unlabelled, y_unlabelled, X_test, y_test)]
+    
+    while any(not clf.done() for clf in classifiers):
+        temp_clfs = []
+        for clf in classifiers:
+            temp_clfs.append([])
+            if workers == 1:
+                for idx in range(len(clf.X_unlabelled)):
+                    new = deepcopy(clf)
+                    new.teach(idx)
+                    temp_clfs[-1].append(new)
+            else:
+                def func(idx):
+                    new = deepcopy(clf)
+                    new.teach(idx)
+                    return new
+                temp_clfs[-1].extend(Parallel(n_jobs=workers)(delayed(lambda i: func(i))(idx) for idx in range(len(clf.X_unlabelled))))
+                
+        for l in temp_clfs:
+            l.sort(key=lambda clf: clf.metrics.frame[metric].iloc[-1], reverse=True)
+        
+        classifiers = [clf for clf in l for l in temp_clfs][:beam_width]
+        temp_clfs = []
+    
+    return classifiers[0]
 
-    best_idx = np.expand_dims(best_idx, axis=-1)
 
-    while True:
-        scores = [[], [], [], [], []]
-        done_work = False
-        for i, x1_idxes in enumerate(best_idx):
-            for x2_idx, x2 in enumerate(X_unlabelled):
-                if x2 in X_unlabelled[x1_idxes]:
-                    continue
+def delete_from_csr(mat, row_indices=None, col_indices=None):
+    """
+    Remove the rows (denoted by ``row_indices``) and columns (denoted by ``col_indices``) from the CSR sparse matrix ``mat``.
+    WARNING: Indices of altered axes are reset in the returned matrix
+    """
+    if not isinstance(mat, csr_matrix):
+        raise ValueError("works only for CSR format -- use .tocsr() first")
 
-                done_work = True
-                clf = SVC(kernel="linear")
+    rows = []
+    cols = []
+    if row_indices is not None:
+        rows = list(row_indices)
+    if col_indices is not None:
+        cols = list(col_indices)
 
-                clf.fit(
-                    np.append(
-                        np.append(X_labelled, X_unlabelled[x1_idxes], axis=0),
-                        [x2],
-                        axis=0,
-                    ),
-                    np.append(
-                        np.append(Y_labelled, Y_oracle[x1_idxes], axis=0),
-                        [Y_oracle[x2_idx]],
-                        axis=0,
-                    ),
-                )
-                scores[i].append(accuracy_score(Y_test, clf.predict(X_test)))
+    if len(rows) > 0 and len(cols) > 0:
+        row_mask = np.ones(mat.shape[0], dtype=bool)
+        row_mask[rows] = False
+        col_mask = np.ones(mat.shape[1], dtype=bool)
+        col_mask[cols] = False
+        return mat[row_mask][:,col_mask]
+    elif len(rows) > 0:
+        mask = np.ones(mat.shape[0], dtype=bool)
+        mask[rows] = False
+        return mat[mask]
+    elif len(cols) > 0:
+        mask = np.ones(mat.shape[1], dtype=bool)
+        mask[cols] = False
+        return mat[:,mask]
+    else:
+        return mat
 
-        if not done_work:
-            break
+    
+def interactive_img_oracle(images):
+    fig, axes = plt.subplots(len(images))
+    for i, (ax, image) in enumerate(zip(np.array(axes).flatten(), images)):
+        ax.imshow(image.reshape(8,8), cmap='gray',interpolation='none')
+        ax.set_xticks(())
+        ax.set_yticks(())
+        ax.set_title(str(i))
+    display(fig)
+    classes = []
+    for i in range(len(images)):
+        klass = input(f"Image {i} class?")
+        if klass == "?":
+            klass = 11
+        classes.append(int(klass))
+    return np.array(classes)
 
-        best_idx2 = np.argsort(scores, axis=None)[:5]
+def expected_error(learner, X, p_subsample=1.0):
+    loss = 'binary'
+    
+    expected_error = np.zeros(shape=(len(X), ))
+    possible_labels = np.unique(learner.y_training)
 
-        idx = np.unravel_index(best_idx2, shape=np.array(scores).shape)
-        print(best_idx)
-        print(scores)
-        print(best_idx2)
+    try:
+        X_proba = learner.predict_proba(X)
+    except NotFittedError:
+        # TODO: implement a proper cold-start
+        return 0, X[0]
 
-        if len(idx) == 1:
-            idx = idx[0]
+    cloned_estimator = clone(learner.estimator)
+
+    for x_idx, x in enumerate(X):
+        # subsample the data if needed
+        if np.random.rand() <= p_subsample:
+            X_reduced = np.delete(X, x_idx, axis=0)
+            # estimate the expected error
+            for y_idx, y in enumerate(possible_labels):
+                X_new = data_vstack((learner.X_training, np.expand_dims(x, axis=0)))
+                y_new = data_vstack((learner.y_training, np.array(y).reshape(1,)))
+
+                cloned_estimator.fit(X_new, y_new)
+                refitted_proba = cloned_estimator.predict_proba(X_reduced)
+                if loss == 'binary':
+                    nloss = _proba_uncertainty(refitted_proba)
+                elif loss == 'log':
+                    nloss = _proba_entropy(refitted_proba)
+
+                expected_error[x_idx] += np.sum(nloss)*X_proba[x_idx, y_idx]
+
         else:
-            best_idx2 = idx[1]
-        best_idx2 = np.expand_dims(best_idx2, axis=0)
-        best_idx = np.block([[np.array(best_idx), best_idx2.T]])
+            expected_error[x_idx] = np.inf
 
-    return best_idx
+    return expected_error

@@ -39,34 +39,31 @@ class Metrics:
             metrics = [accuracy_score, f1_score, roc_auc_score]
         self.name = name
         self.metrics = metrics
-        if "time" in metrics:
-            self.frame = pd.DataFrame(
-                {
-                    "x": [],
-                    **{f.__name__: [] for f in metrics if f != "time"},
-                    "time": [],
-                }
-            )
-        else:
-            self.frame = pd.DataFrame({"x": [], **{f.__name__: [] for f in metrics}})
+        self.frame = pd.DataFrame(
+            {
+                "x": [],
+                **{f.__name__: [] for f in metrics if not isinstance(f, str)},
+                **{name: [] for name in metrics if isinstance(name, str)},
+            }
+        )
 
-    def collect(self, x, clf, labels, test_set, t_elapsed=None):
+    def collect(self, x, clf, labels, test_set, X_unlabelled=None, **kwargs):
         """
         Collect metrics from the classifier using a particular test set and marking the point at x.
         """
 
         result = {}
+        unique_labels = np.unique(labels)
         for metric in self.metrics:
             if metric == f1_score:
                 result[metric.__name__] = f1_score(
                     labels,
                     clf.predict(test_set),
-                    average="micro" if len(np.unique(labels)) > 2 else "binary",
-                    pos_label=np.unique(labels)[1],
+                    average="micro" if len(unique_labels) > 2 else "binary",
+                    pos_label=unique_labels[1] if len(unique_labels) <= 2 else 1,
                 )
             elif metric == roc_auc_score:
-                if len(np.unique(labels)) > 2:
-                    # print(f"proba shape {clf.predict_proba(test_set).shape} labels unique {len(np.unique(labels))}")
+                if len(np.unique(labels)) > 2 or len(labels.shape) > 1:
                     result[metric.__name__] = roc_auc_score(
                         labels, clf.predict_proba(test_set), multi_class="ovr"
                     )
@@ -78,8 +75,12 @@ class Metrics:
                 result[metric.__name__] = empirical_robustness(
                     ScikitlearnSVC(clf), test_set, "fgsm", attack_params={"eps": 0.2}
                 )
-            elif metric == "time":
-                result["time"] = t_elapsed
+            elif metric == "accuracy_train":
+                result[metric.__name__] = accuracy_score(labels, clf.predict(test_set))
+            elif metric == "n_support":
+                result[metric] = np.sum(clf.n_support_)
+            elif isinstance(metric, str):
+                result[metric] = kwargs.get(metric, None)
             else:
                 result[metric.__name__] = metric(labels, clf.predict(test_set))
 
