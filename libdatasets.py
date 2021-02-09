@@ -28,7 +28,7 @@ from bs4 import BeautifulSoup
 # Gcloudb
 
 
-def dataset_summary(datasets):
+def dataset_summary(names, datasets):
     data = [dataset() for dataset in datasets]
     for i in range(len(data)):
         if len(data[i]) == 4:
@@ -38,13 +38,14 @@ def dataset_summary(datasets):
     
     print(tabulate([
         [
+            names[i],
             X.shape[0], 
             np.unique(y).shape[0], 
             X.shape[-1], 
             f"{class_prop[i][0][np.argmax(class_prop[i][1])]} {class_prop[i][1][np.argmax(class_prop[i][1])]/X.shape[0]:.0%}", 
             f"{class_prop[i][0][np.argmin(class_prop[i][1])]} {class_prop[i][1][np.argmin(class_prop[i][1])]/X.shape[0]:.0%}"
         ] for i, (X, y) in enumerate(data)
-    ], headers=["Instances", "Classes", "Features", "Most common class", "Least common class"]))
+    ], headers=["Dataset", "Instances", "Classes", "Features", "Most common class", "Least common class"]))
 
 
 def banknote():
