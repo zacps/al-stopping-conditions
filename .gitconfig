@@ -1,0 +1,17 @@
+# This configuration file makes it easier to work with git submodules.
+# You can enable it with: `git config --local include.path ../.gitconfig`
+#
+# Doing this is *strongly recommended*.
+
+[fetch]
+# Fetch submodule updates if the submodule ref was changed on the remote
+recurseSubmodules = on-demand
+
+[push]
+# Fail pushing a submodule update if there are commits not included
+# in any of the submodules origins.
+recurseSubmodules = check
+
+[status]
+# Include submodules in git status
+submoduleSummary = true
