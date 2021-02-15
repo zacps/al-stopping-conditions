@@ -1,0 +1,3 @@
+[submodule "tvregdiff"]
+	path = tvregdiff
+	url = git@github.com:stur86/tvregdiff.git
