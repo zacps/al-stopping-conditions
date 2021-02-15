@@ -11,8 +11,6 @@ $ pip install poetry
 $ poetry install
 ```
 
-This project will make use of [ThunderSVM](https://github.com/Xtra-Computing/thundersvm/) if available. See their repository for installation instructions.
-
 ## Reproducing
 
 ```bash
