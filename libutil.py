@@ -47,13 +47,13 @@ class Metrics:
             }
         )
 
-    def collect(self, x, clf, labels, test_set, X_unlabelled=None, **kwargs):
+    def collect(self, x, clf, labels, test_set, X_unlabelled=None, unique_labels=None, **kwargs):
         """
         Collect metrics from the classifier using a particular test set and marking the point at x.
         """
 
         result = {}
-        unique_labels = np.unique(labels)
+        unique_labels = unique_labels or np.unique(labels)
         for metric in self.metrics:
             if metric == f1_score:
                 result[metric.__name__] = f1_score(

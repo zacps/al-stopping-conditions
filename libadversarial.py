@@ -18,12 +18,13 @@ from joblib import Parallel, delayed
 from scipy.sparse import csr_matrix
 
 try:
-    from secml.ml.classifiers.sklearn.c_classifier_svm import CClassifierSVM
-    from secml.adv.attacks.poisoning import CAttackPoisoningSVM
-    from secml.ml.kernels.c_kernel_linear import CKernelLinear
-    from secml.data.c_dataset import CDataset
-    from secml.data.data_utils import label_binarize_onehot
-    from secml.array.c_array import CArray
+    #from secml.ml.classifiers.sklearn.c_classifier_svm import CClassifierSVM
+    #from secml.adv.attacks.poisoning import CAttackPoisoningSVM
+    #from secml.ml.kernels.c_kernel_linear import CKernelLinear
+    #from secml.data.c_dataset import CDataset
+    #from secml.data.data_utils import label_binarize_onehot
+    #from secml.array.c_array import CArray
+    pass
 except ImportError:
     pass
 

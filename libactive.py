@@ -50,7 +50,7 @@ def active_split(X, Y, test_size=0.5, labeled_size=0.1, shuffle=True, ensure_y=F
     X_train, X_test, Y_train, Y_test = train_test_split(
         X, Y, test_size=test_size, shuffle=shuffle, random_state=random_state
     )
-    X_train, Y_train = mutator(X_train, Y_train, rand=random_state, config_str=config_str, i=i)
+    X_train, X_test, Y_train, Y_test = mutator(X_train, X_test, Y_train, Y_test, rand=random_state, config_str=config_str, i=i)
     X_labelled, X_unlabelled, Y_labelled, Y_oracle = train_test_split(
         X_train,
         Y_train,
@@ -58,7 +58,7 @@ def active_split(X, Y, test_size=0.5, labeled_size=0.1, shuffle=True, ensure_y=F
         shuffle=shuffle,
         random_state=random_state,
     )
-    # ensure a label for both (assumed binary) classes made it in to the initial train and validation sets
+    # ensure a label for all classes made it in to the initial train and validation sets
     if ensure_y:
         for klass in np.unique(Y):
             if klass not in Y_labelled:

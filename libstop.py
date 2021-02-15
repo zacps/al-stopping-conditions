@@ -40,7 +40,7 @@ Which take a threshold and a number of iterations for which the value should be 
 
 import numpy as np
 from sklearn import metrics
-from sklearn.metrics import roc_auc_score
+from sklearn.metrics import roc_auc_score, f1_score
 from tabulate import tabulate
 from statsmodels.stats.inter_rater import fleiss_kappa
 
@@ -197,13 +197,18 @@ def uncertainty_min(x, uncertainty_min, **kwargs):
     return x.iloc[__is_within_bound(uncertainty_min, **kwargs)]
 
 
-def ZPS(classifiers, **kwargs):
+def ZPS(classifiers, order=1, **kwargs):
     """
     Determine a stopping point based on the accuracy of previously trained classifiers.
     """
     accx, _acc = first_acc(classifiers)
-    grad = np.array(no_ahead_tvregdiff(_acc, 1, 1e-2, plotflag=False, diagflag=False))
+    grad = np.array(no_ahead_tvregdiff(_acc, 1, 1e-1, plotflag=False, diagflag=False))
     start = np.argmax(grad < 0)
+    
+    if order == 2:
+        second = np.array([np.nan, np.nan, *no_ahead_tvregdiff(grad[2:], 1, 1e-1, plotflag=False, diagflag=False)])
+        return accx[np.argmax((grad[start:] >= 0) & (second[start:] >= 0)) + start]
+    
     return accx[np.argmax(grad[start:] >= 0)+start]
 
 
@@ -238,11 +243,20 @@ def acc(classifiers, metric=metrics.accuracy_score, nth=0):
         else:
             pclf = classifiers[0]
             
+        unique_labels = np.unique(clf.y_training)
         if metric == roc_auc_score:
-            if len(np.unique(clf.y_training)) > 2 or len(clf.y_training.shape) > 1:
+            if len(unique_labels) > 2 or len(clf.y_training.shape) > 1:
                 diffs.append(metric(clf.y_training[-size:], pclf.predict_proba(clf.X_training[-size:]), multi_class="ovr"))
             else:
                 diffs.append(metric(clf.y_training[-size:], pclf.predict_proba(clf.X_training[-size:])[:,1]))
+        elif metric == f1_score:
+            diffs.append(metric(
+                clf.y_training[-size:], 
+                pclf.predict(clf.X_training[-size:]),
+                average="micro" if len(unique_labels) > 2 else "binary",
+                pos_label=unique_labels[1] if len(unique_labels) <= 2 else 1
+            ))
+                    
         else:
             diffs.append(metric(clf.y_training[-size:], pclf.predict(clf.X_training[-size:])))
     return x, diffs
@@ -267,7 +281,25 @@ def first_acc(classifiers, metric=metrics.accuracy_score):
         
         pclf = classifiers[0]
         
-        diffs.append(metric(clf.y_training, pclf.predict(clf.X_training)))
+        unique_labels = np.unique(clf.y_training)
+        if metric == roc_auc_score:
+            prediction = pclf.predict_proba(clf.X_training)
+            try:
+                if len(unique_labels) > 2 or len(clf.y_training.shape) > 1:
+                    diffs.append(metric(clf.y_training, prediction, multi_class="ovr"))
+                else:
+                    diffs.append(metric(clf.y_training, prediction[:,1]))
+            except ValueError:
+                print(prediction)
+        elif metric == f1_score:
+            diffs.append(metric(
+                clf.y_training[-size:], 
+                pclf.predict(clf.X_training[-size:]),
+                average="micro" if len(unique_labels) > 2 else "binary",
+                pos_label=unique_labels[1] if len(unique_labels) <= 2 else 1
+            ))
+        else:
+            diffs.append(metric(clf.y_training, pclf.predict(clf.X_training)))
         
     return x, diffs
 

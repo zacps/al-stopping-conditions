@@ -1,6 +1,7 @@
 import tarfile
 import pickle
 import glob
+from functools import partial
 
 import pandas as pd
 import numpy as np
@@ -12,9 +13,6 @@ from tabulate import tabulate
 from bs4 import BeautifulSoup
 
 # Datasets to implement in order of active learning difficulty (from ALDataset)
-# German
-# Sonar
-# Splice
 # Clean1 (multiple instance problem, complicating factor?)
 # Diabetes
 # Australian
@@ -35,7 +33,6 @@ def dataset_summary(names, datasets):
             data[i] = (np.concatenate((data[i][0], data[i][2])), np.concatenate((data[i][1], data[i][3])))
     class_prop=[np.unique(y, return_counts=True) for X, y in data]
     
-    
     print(tabulate([
         [
             names[i],
@@ -43,12 +40,26 @@ def dataset_summary(names, datasets):
             np.unique(y).shape[0], 
             X.shape[-1], 
             f"{class_prop[i][0][np.argmax(class_prop[i][1])]} {class_prop[i][1][np.argmax(class_prop[i][1])]/X.shape[0]:.0%}", 
-            f"{class_prop[i][0][np.argmin(class_prop[i][1])]} {class_prop[i][1][np.argmin(class_prop[i][1])]/X.shape[0]:.0%}"
+            f"{class_prop[i][0][np.argmin(class_prop[i][1])]} {class_prop[i][1][np.argmin(class_prop[i][1])]/X.shape[0]:.0%}",
+            getattr(datasets[i], "domain", "general")
         ] for i, (X, y) in enumerate(data)
-    ], headers=["Dataset", "Instances", "Classes", "Features", "Most common class", "Least common class"]))
+    ], headers=["Dataset", "Instances", "Classes", "Features", "Most common class", "Least common class", "Domain"]))
+
+    
+def attr(name, value):
+    def decorator(func):
+        setattr(func, name, value)
+        return func
+    return decorator
+    
+domain = partial(attr, "domain")
+source = partial(attr, "source")
 
 
-def banknote():
+# ------------------------------------------------------------------------------------------------------------------------------
+
+@source("https://archive.ics.uci.edu/ml/datasets/banknote+authentication")
+def banknote(dataset_size=1000):
     url = "https://archive.ics.uci.edu/ml/machine-learning-databases/00267/data_banknote_authentication.txt"
     dataset = pd.read_csv(url, header=None)
     y = dataset[4].to_numpy()
@@ -58,6 +69,9 @@ def banknote():
     # pca = PCA(n_components=21).fit(X)
     # X = pca.transform(X)
     X = np.append(X, isInB, axis=1)
+    
+    if dataset_size is not None:
+        X, _, y, _ = train_test_split(X, y, train_size=dataset_size, random_state=42)
 
     return X, y
 
@@ -70,6 +84,7 @@ def bias_banknote(data, labels):
     return X, y
 
 
+@source("https://archive.ics.uci.edu/ml/datasets/haberman's+survival")
 def haberman():
     url = "https://archive.ics.uci.edu/ml/machine-learning-databases/00267/data_banknote_authentication.txt"
     dataset = pd.read_csv(url, header=None)
@@ -87,7 +102,8 @@ def digits():
     return data, digits.target
 
 
-def abalone():
+@source("https://archive.ics.uci.edu/ml/datasets/abalone")
+def abalone(dataset_size=1000):
     url = (
         "https://archive.ics.uci.edu/ml/machine-learning-databases/abalone/abalone.data"
     )
@@ -97,6 +113,9 @@ def abalone():
     isInB = isInB.reshape(len(isInB), 1)
     X = dataset.drop([0, 6], axis=1).to_numpy()
     X = np.append(X, isInB, axis=1)
+    
+    if dataset_size is not None:
+        X, _, y, _ = train_test_split(X, y, train_size=dataset_size, random_state=42)
 
     return X, y
 
@@ -109,6 +128,7 @@ def bias_abalone(data, labels):
     return X, y
 
 
+@source("https://archive.ics.uci.edu/ml/datasets/car+evaluation")
 def car():
     url = "https://archive.ics.uci.edu/ml/machine-learning-databases/car/car.data"
     toNum = {
@@ -145,7 +165,7 @@ def bias_car(data, labels):
     return X, y
 
 
-def cardio():
+def cardio(dataset_size=1000):
     dataset = pd.read_csv(
         "Imitate/Datasets/cardio_train.csv", header=0, sep=";", index_col=0
     )
@@ -158,8 +178,8 @@ def cardio():
 
     X = np.append(dataset.to_numpy(), isInB, axis=1)
 
-    # draw sample
-    X, _, y, _ = train_test_split(X, y, test_size=0.985)
+    if dataset_size is not None:
+        X, _, y, _ = train_test_split(X, y, train_size=dataset_size, random_state=42)
 
     return X, y
 
@@ -172,7 +192,7 @@ def bias_cardio(data, labels):
     return X, y
 
 
-def shuttle(dataset_size=58000):
+def shuttle(dataset_size=1000):
     dataset1 = pd.read_csv("Imitate/Datasets/shuttle.trn", header=None, sep="\s")
     dataset2 = pd.read_csv("Imitate/Datasets/shuttle.tst", header=None, sep="\s")
     dataset = np.concatenate((dataset1, dataset2))
@@ -184,8 +204,8 @@ def shuttle(dataset_size=58000):
     # X = pca.transform(X)
     X = np.append(X, isInB, axis=1)
 
-    # draw sample
-    X, _, y, _ = train_test_split(X, y, test_size=0.8)
+    if dataset_size is not None:
+        X, _, y, _ = train_test_split(X, y, train_size=dataset_size, random_state=42)
 
     return X, y
 
@@ -198,7 +218,8 @@ def bias_shuttle(data, labels):
     return X, y
 
 
-def skin(dataset_size=4177):
+@source("https://archive.ics.uci.edu/ml/datasets/skin+segmentation")
+def skin(dataset_size=1000):
     url = "https://archive.ics.uci.edu/ml/machine-learning-databases/00229/Skin_NonSkin.txt"
     dataset = pd.read_csv(url, header=None, sep="\t")
     y = dataset[3].to_numpy()
@@ -209,8 +230,8 @@ def skin(dataset_size=4177):
     # X = pca.transform(X)
     X = np.append(X, isInB, axis=1)
 
-    # draw sample
-    X, _, y, _ = train_test_split(X, y, test_size=0.95, random_state=42)
+    if dataset_size is not None:
+        X, _, y, _ = train_test_split(X, y, train_size=dataset_size, random_state=42)
 
     return X, y
 
@@ -223,6 +244,7 @@ def bias_skin(data, labels):
     return X, y
 
 
+@source("https://archive.ics.uci.edu/ml/datasets/statlog+(german+credit+data)")
 def german():
     url = "https://archive.ics.uci.edu/ml/machine-learning-databases/statlog/german/german.data-numeric"
     dataset = pd.read_csv(url, header=None, delim_whitespace=True)
@@ -231,6 +253,7 @@ def german():
     return X, y
 
 
+@source("http://archive.ics.uci.edu/ml/datasets/connectionist+bench+(sonar,+mines+vs.+rocks)")
 def sonar():
     url = "http://archive.ics.uci.edu/ml/machine-learning-databases/undocumented/connectionist-bench/sonar/sonar.all-data"
     dataset = pd.read_csv(url, header=None)
@@ -239,13 +262,19 @@ def sonar():
     return X, y
 
 
-def splice():
+@source("https://archive.ics.uci.edu/ml/datasets/Molecular+Biology+(Splice-junction+Gene+Sequences)")
+def splice(dataset_size=1000):
     url = "https://archive.ics.uci.edu/ml/machine-learning-databases/molecular-biology/splice-junction-gene-sequences/splice.data"
     dataset = pd.read_csv(url, header=None)
     y = dataset[0].to_numpy()
     X = dataset[2].apply(lambda x: pd.Series(list(x.strip()))).to_numpy()
     X = sklearn.preprocessing.OneHotEncoder().fit_transform(X)
+    
+    if dataset_size is not None:
+        X, _, y, _ = train_test_split(X, y, train_size=dataset_size, random_state=42)
+    
     return X, y
+
 
 def mfeat():
     url = "https://archive.ics.uci.edu/ml/machine-learning-databases/mfeat/mfeat-pix"
@@ -253,7 +282,9 @@ def mfeat():
     
     # TODO:
     
-def bbbp():
+    
+@source("https://linkinghub.elsevier.com/retrieve/pii/S001048252030528X")
+def bbbp(dataset_size=1000):
     """
     https://linkinghub.elsevier.com/retrieve/pii/S001048252030528X
     """
@@ -262,11 +293,14 @@ def bbbp():
     X = dataset.iloc[:,2:514].to_numpy()
     y = dataset["penetration"].to_numpy()
     
-    X, _, y, _ = train_test_split(X, y, test_size=0.5, random_state=42)
+    if dataset_size is not None:
+        X, _, y, _ = train_test_split(X, y, train_size=dataset_size, random_state=42)
     
     return X, y
 
-def hiv():
+
+@source("https://linkinghub.elsevier.com/retrieve/pii/S001048252030528X")
+def hiv(dataset_size=1000):
     """
     https://linkinghub.elsevier.com/retrieve/pii/S001048252030528X
     """
@@ -275,11 +309,14 @@ def hiv():
     y = dataset["activity"].to_numpy()
     X = dataset.iloc[:,3:515].to_numpy()
     
-    X, _, y, _ = train_test_split(X, y, test_size=0.975, random_state=42)
+    if dataset_size is not None:
+        X, _, y, _ = train_test_split(X, y, train_size=dataset_size, random_state=42)
     
     return X, y
 
-def mutagen():
+
+@source("https://linkinghub.elsevier.com/retrieve/pii/S001048252030528X")
+def mutagen(dataset_size=1000):
     """
     https://linkinghub.elsevier.com/retrieve/pii/S001048252030528X
     """
@@ -288,11 +325,14 @@ def mutagen():
     y = dataset['mutagen'].to_numpy()
     X = dataset.iloc[:,2:514].to_numpy()
     
-    X, _, y, _ = train_test_split(X, y, test_size=0.84, random_state=42)
+    if dataset_size is not None:
+        X, _, y, _ = train_test_split(X, y, train_size=dataset_size, random_state=42)
     
     return X, y
-    
-def MUV(dataset_id):
+
+
+@source("https://linkinghub.elsevier.com/retrieve/pii/S001048252030528X")
+def MUV(dataset_id, dataset_size=1000):
     """
     Contains datasets 466, 548, 600, 644, 652, 689, 692, 712, 713, 733, 737, 810, 832, 846, 852, 858, 859
     
@@ -306,10 +346,13 @@ def MUV(dataset_id):
     y = dataset[str(dataset_id)].to_numpy('int')
     X = dataset.iloc[:,dataset.columns.get_loc('cddd_1'):dataset.columns.get_loc('cddd_512')].to_numpy('float')
     
-    X, _, y, _ = train_test_split(X, y, train_size=4000, random_state=42)
+    if dataset_size is not None:
+        X, _, y, _ = train_test_split(X, y, train_size=dataset_size, random_state=42)
     
     return X, y
+  
     
+@source("https://linkinghub.elsevier.com/retrieve/pii/S001048252030528X")
 def sider():
     """
     https://linkinghub.elsevier.com/retrieve/pii/S001048252030528X
@@ -328,10 +371,14 @@ def sider():
     
     return X, y
 
+
+@source("https://linkinghub.elsevier.com/retrieve/pii/S001048252030528X")
 def tox21(dataset_id):
     """
     Contains datasets:
     ['nr-ahr','nr-ar-lbd','nr-aromatase','nr-ar','nr-er-lbd','nr-er','nr-ppar-gamma','sr-are','sr-atad5','sr-hse','sr-mmp','sr-p53']
+    
+    Performance saturates immediately on a linear svm, not a good active learning target.
     
     https://linkinghub.elsevier.com/retrieve/pii/S001048252030528X
     """
@@ -347,22 +394,33 @@ def tox21(dataset_id):
     
     return X, y
 
-def mnist(dataset_size=1000):
+
+@domain("image")
+def mnist(dataset_size=1000, digits=None):
     X, y = fetch_openml('mnist_784', version=1, return_X_y=True, as_frame=False)
     
-    if dataset_size != 70000:
+    if digits is not None:
+        assert len(digits) == 2
+        idx = np.where((y == str(digits[0])) | (y == str(digits[1])))
+        X = X[idx]
+        y = y[idx]
+    
+    if dataset_size is not None:
         X, _, y, _ = train_test_split(X, y, train_size=dataset_size, random_state=42)
     
     return X, y
 
-def quickdraw():
+
+@domain("image")
+@source("https://github.com/googlecreativelab/quickdraw-dataset")
+def quickdraw(dataset_size=1000, classes=("cat", "dolphin", "angel", "face")):
     """
     Using the same classes as 'Adversarial Active Learning'.
     """
     
     Xs = []
     ys = []
-    for i, klass in enumerate(["cat", "dolphin", "angel", "face"]):
+    for i, klass in enumerate(classes):
         X = np.load(f"datasets/full_numpy_bitmap_{klass}.npy")
         y = np.zeros((X.shape[0], 4))
         y[:,i] = np.ones(X.shape[0])
@@ -377,12 +435,15 @@ def quickdraw():
     encoder.fit(list(range(1, 5)))
     y = encoder.inverse_transform(y)
     
-    X, _, y, _ = train_test_split(X, y, train_size=4000, random_state=42)
+    if dataset_size is not None:
+        X, _, y, _ = train_test_split(X, y, train_size=dataset_size, random_state=42)
     
     return X, y
     
     
-def newsgroups(categories=None):
+@source("https://scikit-learn.org/0.19/datasets/twenty_newsgroups.html")
+@domain("nlp")
+def newsgroups(dataset_size=1000, categories=None):
     bunch = datasets.fetch_20newsgroups_vectorized(subset='all', remove=('headers'), normalize=True)
     X = bunch.data
     y = bunch.target
@@ -394,28 +455,42 @@ def newsgroups(categories=None):
         y = y[idx]
         X = X[idx]
         
+    if dataset_size is not None:
+        X, _, y, _ = train_test_split(X, y, train_size=dataset_size, random_state=42)
 
     return X, y
 
 
-def reuters21578():
+@source("https://archive.ics.uci.edu/ml/datasets/Reuters-21578+Text+Categorization+Collection")
+@domain("nlp")
+def reuters21578(dataset_size=1000):
     """
-    This seems like a nightmare to preprocess...
     """
     url = 'https://archive.ics.uci.edu/ml/machine-learning-databases/reuters21578-mld/reuters21578.tar.gz'
     dataset = pd.read_csv(url, compression='gzip', header=None)
+    
+    if dataset_size is not None:
+        X, _, y, _ = train_test_split(X, y, train_size=dataset_size, random_state=42)
+    
     return dataset
 
 
-def rcv1(category='CCAT'):
+@domain("nlp")
+def rcv1(dataset_size=1000, category='CCAT'):
     bunch = datasets.fetch_rcv1()
     y = bunch.target.getcol(np.where(bunch.target_names == category)[0][0])
     y = np.squeeze(np.array(y.todense()))
     X = bunch.data
+    
+    if dataset_size is not None:
+        X, _, y, _ = train_test_split(X, y, train_size=dataset_size, random_state=42)
+    
     return X, y
     
     
-def cifar10():
+@source("http://www.cs.toronto.edu/~kriz/cifar.html")
+@domain("image")
+def cifar10(dataset_size=1000):
     """
     Image recognition dataset.
     
@@ -433,9 +508,16 @@ def cifar10():
     X_test = dicts[-1][b'data']
     y_test = np.array(dicts[-1][b'labels'])
     
-    return X_train, y_train, X_test, y_test
+    X = np.concatenate((X_train, X_test), axis=0)
+    y = np.concatenate((y_train, y_test), axis=0)
+    
+    if dataset_size is not None:
+        X, _, y, _ = train_test_split(X, y, train_size=dataset_size, random_state=42)
+    
+    return X, y
         
-        
+      
+@domain("physics")
 def higgs():
     dataset = pd.read_csv(r'https://archive.ics.uci.edu/ml/machine-learning-databases/00280/HIGGS.csv.gz', compression='gz')
     y = dataset[0].to_numpy()
@@ -446,7 +528,9 @@ def higgs():
     return X, y
 
 
-def webkb():
+@source("http://www.cs.cmu.edu/afs/cs.cmu.edu/project/theo-20/www/data/")
+@domain("nlp")
+def webkb(dataset_size=1000):
     """
     http://www.cs.cmu.edu/afs/cs.cmu.edu/project/theo-20/www/data/
     """
@@ -463,14 +547,19 @@ def webkb():
                 docs.append((soup.get_text(), klass))
                 
     X = [doc[0] for doc in docs]
-    y = [doc[1] for doc in docs]
+    y = np.array([doc[1] for doc in docs])
     
     X = sklearn.feature_extraction.text.CountVectorizer(min_df=2).fit_transform(X)
     
-    return X, np.array(y)
+    if dataset_size is not None:
+        X, _, y, _ = train_test_split(X, y, train_size=dataset_size, random_state=42)
     
- 
-def spamassassin():
+    return X, y
+
+
+@source("https://spamassassin.apache.org/old/publiccorpus/")
+@domain("nlp")
+def spamassassin(dataset_size=1000):
     """
     https://spamassassin.apache.org/old/publiccorpus/
     """
@@ -495,7 +584,112 @@ def spamassassin():
                 docs.append((archive.extractfile(file).read().decode('latin-1'), 'ham'))
                 
     X = [doc[0] for doc in docs]
-    y = [doc[1] for doc in docs]
+    y = np.array([doc[1] for doc in docs])
     X = sklearn.feature_extraction.text.CountVectorizer(min_df=2).fit_transform(X)
     
-    return X, np.array(y)
+    if dataset_size is not None:
+        X, _, y, _ = train_test_split(X, y, train_size=dataset_size, random_state=42)
+    
+    return X, y
+
+
+@source("http://archive.ics.uci.edu/ml/datasets/Smartphone-Based+Recognition+of+Human+Activities+and+Postural+Transitions")
+def smartphone(dataset_size=1000):
+    """
+    http://archive.ics.uci.edu/ml/datasets/Smartphone-Based+Recognition+of+Human+Activities+and+Postural+Transitions
+    """
+    
+    # Set header=None?
+    X_train = pd.read_csv('datasets/smartphone/Train/X_train.txt', sep=' ')
+    X_test = pd.read_csv('datasets/smartphone/Test/X_test.txt', sep=' ')
+    y_train = pd.read_csv('datasets/smartphone/Train/y_train.txt')
+    y_test = pd.read_csv('datasets/smartphone/Test/y_test.txt')
+    
+    if dataset_size is not None:
+        X, _, y, _ = train_test_split(X, y, train_size=dataset_size, random_state=42)
+
+    return (np.concatenate((X_train.to_numpy(), X_test.to_numpy()), axis=0), 
+            np.concatenate((y_train.to_numpy(), y_test.to_numpy()), axis=0))
+
+
+@source("https://archive.ics.uci.edu/ml/datasets/Covertype")
+def covertype(dataset_size=1000):
+    """
+    https://archive.ics.uci.edu/ml/datasets/Covertype
+    """
+    
+    data = pd.read_csv('https://archive.ics.uci.edu/ml/machine-learning-databases/covtype/covtype.data.gz', header=None)
+    y = data.iloc[:,-1]
+    X = data.iloc[:,0:-1]
+    
+    if dataset_size is not None:
+        X, _, y, _ = train_test_split(X, y, train_size=dataset_size, random_state=42)
+    
+    return X, y
+    
+    
+@domain("physical")
+def htru2(dataset_size=1000):
+    data = pd.read_csv('datasets/HTRU2/HTRU_2.csv', header=None)
+    y = data.iloc[:,-1]
+    X = data.iloc[:,0:-1]
+    
+    if dataset_size is not None:
+        X, _, y, _ = train_test_split(X, y, train_size=dataset_size, random_state=42)
+        
+    return X, y
+
+
+@domain("computer")
+def ida2016(dataset_size=1000):
+    test = pd.read_csv('datasets/IDA2016Challenge/aps_failure_test_set.csv', header=14, sep=',')
+    train = pd.read_csv('datasets/IDA2016Challenge/aps_failure_training_set.csv', header=14, sep=',')
+    
+    y = np.concatenate((test.iloc[:,0].to_numpy(), train.iloc[:,0].to_numpy()))
+    X = np.concatenate((test.iloc[:,1:].to_numpy(), train.iloc[:,1:].to_numpy()))
+    
+    if dataset_size is not None:
+        X, _, y, _ = train_test_split(X, y, train_size=dataset_size, random_state=42)
+        
+    return X, y
+
+
+@source("https://archive.ics.uci.edu/ml/datasets/Detect+Malware+Types")
+@domain("computer")
+def malware(dataset_size=1000):
+    data = pd.read_csv('datasets/malware/staDynVt2955Lab.csv')
+    X = data.iloc[:,0:-1]
+    y = data.iloc[:,-1]
+    
+    if dataset_size is not None:
+        X, _, y, _ = train_test_split(X, y, train_size=dataset_size, random_state=42)
+        
+    return X, y
+
+
+@source("https://archive.ics.uci.edu/ml/datasets/Shill+Bidding+Dataset")
+def bidding(dataset_size=1000):
+    """
+    https://archive.ics.uci.edu/ml/datasets/Shill+Bidding+Dataset
+    """
+    data = pd.read_csv('https://archive.ics.uci.edu/ml/machine-learning-databases/00562/Shill%20Bidding%20Dataset.csv')
+    X = data.iloc[:,0:-1]
+    y = data.iloc[:,-1]
+    
+    if dataset_size is not None:
+        X, _, y, _ = train_test_split(X, y, train_size=dataset_size, random_state=42)
+        
+    return X, y
+
+
+@source("https://archive.ics.uci.edu/ml/datasets/Swarm+Behaviour")
+def swarm(dataset_size=1000, predict='flocking'):
+    data = pd.read_csv(f'datasets/swarm/{predict.capitalize()}.csv')
+    X = data.iloc[:,0:-1]
+    y = data.iloc[:,-1]
+    
+    if dataset_size is not None:
+        X, _, y, _ = train_test_split(X, y, train_size=dataset_size, random_state=42)
+        
+    return X, y
+    

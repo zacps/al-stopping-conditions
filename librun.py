@@ -3,6 +3,9 @@ import io
 import itertools
 import math
 import pickle
+import socket
+import inspect
+from time import monotonic
 from collections import defaultdict
 from dataclasses import dataclass
 from typing import Dict, Any, Callable
@@ -10,7 +13,9 @@ from functools import partial
 import json
 import math
 from itertools import groupby
+import glob
 
+import requests
 import pandas as pd
 import matplotlib.pyplot as plt
 from IPython.core.display import HTML, display
@@ -95,24 +100,46 @@ def run(
 ):
     __progress_hack()
     configurations = Configurations(matrix)
+    start = monotonic()
 
     if workers is None:
         workers = os.cpu_count()
         if "sched_getaffinity" in dir(os):
             workers = len(os.sched_getaffinity(0))
 
-    results = ProgressParallel(
-        n_jobs=math.ceil(workers / configurations.meta["n_runs"]),
-        total=len(configurations),
-        desc=f"Experiment",
-        leave=False,
-        backend=backend,
-    )(
-        delayed(__run_inner)(
-            config, force_cache=force_cache, force_run=force_run, abort=abort, metrics_measures=metrics
+    try:
+        results = ProgressParallel(
+            n_jobs=math.ceil(workers / configurations.meta["n_runs"]),
+            total=len(configurations),
+            desc=f"Experiment",
+            leave=False,
+            backend=backend,
+        )(
+            delayed(__run_inner)(
+                config, force_cache=force_cache, force_run=force_run, abort=abort, metrics_measures=metrics, workers=workers
+            )
+            for config in configurations
         )
-        for config in configurations
-    )
+    except Exception as e:
+        duration = monotonic()-start
+        
+        top = inspect.stack()[-1]
+        filename = os.path.basename(top.filename)
+        requests.post(
+            'https://discord.com/api/webhooks/809248326485934080/aIHL726wKxk42YpDI_GtjsqfAWuFplO3QrXoza1r55XRT9-Ao9Rt8sBtexZ-WXSPCtsv', 
+            data={'content': f"Run with {len(configurations)} experiments on {socket.gethostname()} **FAILED** after {duration/60/60:.1f}h\nNotebook `{filename}`\n```{e}```"}
+        )
+        raise e
+    
+    duration = monotonic()-start
+    
+    if duration > 10*60:
+        top = inspect.stack()[-1]
+        filename = os.path.basename(top.filename)
+        requests.post(
+            'https://discord.com/api/webhooks/809248326485934080/aIHL726wKxk42YpDI_GtjsqfAWuFplO3QrXoza1r55XRT9-Ao9Rt8sBtexZ-WXSPCtsv', 
+            data={'content': f"Run with {len(configurations)} experiments on {socket.gethostname()} completed after {duration/60/60:.1f}h\nNotebook `{filename}`"}
+        )
 
     return results
 
@@ -124,6 +151,16 @@ def plot(results, plot_robustness=False, key=None, series=None, title=None, ret=
             config_result[0].dataset_mutator_name,
             getattr(config_result[0], "model_name", None),
         )
+    #if isinstance(results[0][1], list):
+    #    print("Deaggregated")
+    #    for i in range(len(results)):
+    #        print(type(results[i][0][0]))
+    #        print(type(results[i][0][1:]))
+    #        merged = pd.concat([results[i][1][0]] + [x for x in results[i][1][1:]])
+    #        averaged = merged.groupby(merged.index).mean()
+    #        sem = merged.groupby(merged.index).sem()
+    #        sem.columns = [str(col) + "_stderr" for col in sem.columns]
+    #        results[i] = pd.concat([averaged, sem], axis=1)
     if series is None:
         series = lambda config: config.method_name
     if title is None:
@@ -228,7 +265,7 @@ def table(results, tablefmt="fancy_grid"):
         )
 
 
-def __run_inner(config, force_cache=False, force_run=False, backend="loky", abort=None, metrics_measures=None):
+def __run_inner(config, force_cache=False, force_run=False, backend="loky", abort=None, metrics_measures=None, workers=None):
     if metrics_measures is None:
         metrics_measures = [
             accuracy_score,
@@ -237,16 +274,23 @@ def __run_inner(config, force_cache=False, force_run=False, backend="loky", abor
             empirical_robustness,
             "time"
         ]
+        
+    # Monomorphise parametric meta parameters
+    for k, v in config.meta.items():
+        if isinstance(v, dict):
+            config.meta[k] = v.get(config.dataset_name, v["*"])
     
     try:
         try:
-            cached_config, metrics = __read_result(f"cache/{config.serialize()}.csv")
+            cached_config, metrics = __read_result(f"cache/{config.serialize()}.csv", config)
             if config.meta.get("ret_classifiers"):
                 classifiers = __read_classifiers(config)
         except FileNotFoundError as e:
             if config.model_name == None or config.model_name == "svm-linear":
-                cached_config, metrics = __read_result(f"cache/{config.serialize_no_model()}.csv")
+                cached_config, metrics = __read_result(f"cache/{config.serialize_no_model()}.csv", config)
                 cached_config.model_name = "svm-linear"
+                if config.meta.get("ret_classifiers"):
+                    classifiers = __read_classifiers(config)
             else:
                 raise e
         if force_run:
@@ -256,13 +300,14 @@ def __run_inner(config, force_cache=False, force_run=False, backend="loky", abor
         else:
             return ((cached_config, metrics), classifiers)
 
-    except (FileNotFoundError, EOFError):
+    except (FileNotFoundError, EOFError, pd.errors.EmptyDataError):
         if force_cache:
             raise Exception(f"Cache file 'cache/{config.serialize()}.csv' not found")
             
-        workers = os.cpu_count()
-        if "sched_getaffinity" in dir(os):
-            workers = len(os.sched_getaffinity(0))
+        if workers is None:
+            workers = os.cpu_count()
+            if "sched_getaffinity" in dir(os):
+                workers = len(os.sched_getaffinity(0))
 
         try:
             # Seed a random state generator. This seed is constant between methods/datasets/models so comparisons can be made with fewer runs.
@@ -308,7 +353,8 @@ def __run_inner(config, force_cache=False, force_run=False, backend="loky", abor
                 raise e
             print("WARN: Experiment failed, continuing anyway")
             return (config, None)
-        metrics = metrics[0].average2(metrics[1:])
+        if config.meta.get("aggregate", True):
+            metrics = metrics[0].average2(metrics[1:])
         __write_result(config, metrics)
         if config.meta.get("ret_classifiers", False):
             __write_classifiers(config, classifiers)
@@ -320,11 +366,19 @@ def __run_inner(config, force_cache=False, force_run=False, backend="loky", abor
 
 
 def __write_result(config, result):
-    file = f"cache/{config.serialize()}.csv"
-    with open(file, "w") as f:
-        json.dump(config.json(), f)
-        f.write("\n")
-        result.to_csv(f)
+    if isinstance(result, list):
+        for i in range(len(result)):
+            file = f"cache/{config.serialize()}_{i}.csv"
+            with open(file, "w") as f:
+                json.dump(config.json(), f)
+                f.write("\n")
+                result[i].frame.to_csv(f)
+    else:
+        file = f"cache/{config.serialize()}.csv"
+        with open(file, "w") as f:
+            json.dump(config.json(), f)
+            f.write("\n")
+            result.to_csv(f)
         
         
 def __write_classifiers(config, classifiers):
@@ -337,11 +391,19 @@ def __read_classifiers(config):
     with open(file, "rb") as f:
         return pickle.load(f)
 
-def __read_result(file):
-    with open(file, "r") as f:
-        config = Config(**{"model_name": "svm-linear", **json.loads(f.readline())})
-        result = pd.read_csv(f, index_col=0)
-    return (config, result)
+def __read_result(file, config):
+    if config.meta.get("aggregate", True):
+        with open(file, "r") as f:
+            config = Config(**{"model_name": "svm-linear", **json.loads(f.readline())})
+            result = pd.read_csv(f, index_col=0)
+        return (config, result)
+    else:
+        results = []
+        for name in glob.glob(f"cache/{config.serialize()}_*.csv"):
+            with open(name, "r") as f:
+                config = Config(**{"model_name": "svm-linear", **json.loads(f.readline())})
+                results.append(pd.read_csv(f, index_col=0))
+        return config, results
 
 
 def __flatten_dict(d):
