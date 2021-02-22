@@ -1,6 +1,8 @@
 from typing import Tuple, Union, Callable
 import time
 from copy import deepcopy
+import pickle
+import zlib
 
 import matplotlib.pyplot as plt
 from matplotlib.patches import ConnectionPatch
@@ -21,9 +23,11 @@ from sklearn.naive_bayes import GaussianNB
 from sklearn.neighbors import KNeighborsClassifier
 from sklearn.linear_model import Perceptron
 from sklearn.base import clone
+from sklearn.svm import SVC
 from modAL.utils.data import data_vstack
 from modAL.utils.selection import multi_argmax
 from modAL.uncertainty import _proba_uncertainty, _proba_entropy, classifier_uncertainty
+import scipy
 
 from libadversarial import fgm, deepfool
 from libplot import plot_classification, plot_poison, c_plot_poison
@@ -31,12 +35,9 @@ from libutil import Metrics
 
 # Use GPU-based thundersvm when available
 try:
-    from thundersvm import SVC
-    raise Exception("disabled")
-    print("Using ThunderSVM")
+    from thundersvm import SVC as ThunderSVC
 except Exception:
-    from sklearn.svm import SVC
-    print("Using sklearn")
+    pass
 
 
 def active_split(X, Y, test_size=0.5, labeled_size=0.1, shuffle=True, ensure_y=False, random_state=None, mutator=lambda *args: args, config_str=None, i=None):
@@ -122,6 +123,13 @@ class MyActiveLearner:
         if model == "svm-linear":
             return ActiveLearner(
                 estimator=SVC(kernel="linear", probability=True),
+                X_training=X_labelled,
+                y_training=Y_labelled,
+                query_strategy=query_strategy,
+            )
+        elif model == "thunder-svm-linear":
+            return ActiveLearner(
+                estimator=ThunderSVC(kernel="linear", probability=True),
                 X_training=X_labelled,
                 y_training=Y_labelled,
                 query_strategy=query_strategy,
@@ -306,13 +314,20 @@ class MyActiveLearner:
         teach_advesarial=False,
         stop_function=lambda learner: False,
         ret_classifiers=False,
-        stop_info=False
+        stop_info=False,
+        compress=False,
+        config_str=None,
+        i=i
     ) -> Tuple[list, list]:
         """
         Perform active learning on the given dataset, querying data with the given query strategy.
 
         Returns metrics describing the performance of the query strategy, and optionally all classifiers trained during learning.
         """
+        
+        #cached = __restore_run(config_str, i)
+        #if cached is not None:
+        #    return cached
 
         learner = self.__setup_learner(
             X_labelled, Y_labelled, query_strategy, model=model
@@ -384,9 +399,11 @@ class MyActiveLearner:
             plt.close(self.fig)
 
         if not ret_classifiers:
+            #__write_run(config_str, i, self.metrics)
             return (self.metrics, None)
         else:
-            return (self.metrics, classifiers)
+            #__write_run(config_str, i, self.metrics, classifiers)
+            return (self.metrics, zlib.compress(pickle.dumps(classifiers)) if compress else classifiers)
 
     def active_learn_query_synthesis(
         self,
@@ -615,27 +632,33 @@ def interactive_img_oracle(images):
         classes.append(int(klass))
     return np.array(classes)
 
-def expected_error(learner, X, p_subsample=1.0):
+def expected_error(learner, X, predict_proba=None, p_subsample=1.0):
     loss = 'binary'
     
-    expected_error = np.zeros(shape=(len(X), ))
+    expected_error = np.zeros(shape=(X.shape[0], ))
     possible_labels = np.unique(learner.y_training)
 
     try:
-        X_proba = learner.predict_proba(X)
+        X_proba = predict_proba or learner.predict_proba(X)
     except NotFittedError:
         # TODO: implement a proper cold-start
         return 0, X[0]
 
     cloned_estimator = clone(learner.estimator)
 
-    for x_idx, x in enumerate(X):
+    for x_idx in range(X.shape[0]):
         # subsample the data if needed
         if np.random.rand() <= p_subsample:
-            X_reduced = np.delete(X, x_idx, axis=0)
+            if isinstance(X, csr_matrix):
+                X_reduced = delete_from_csr(X, [x_idx])
+            else:
+                X_reduced = np.delete(X, x_idx, axis=0)
             # estimate the expected error
             for y_idx, y in enumerate(possible_labels):
-                X_new = data_vstack((learner.X_training, np.expand_dims(x, axis=0)))
+                if isinstance(X, csr_matrix):
+                    X_new = scipy.sparse.vstack((learner.X_training, X[[x_idx]]))
+                else:
+                    X_new = data_vstack((learner.X_training, np.expand_dims(X[x_idx], axis=0)))
                 y_new = data_vstack((learner.y_training, np.array(y).reshape(1,)))
 
                 cloned_estimator.fit(X_new, y_new)
@@ -644,6 +667,8 @@ def expected_error(learner, X, p_subsample=1.0):
                     nloss = _proba_uncertainty(refitted_proba)
                 elif loss == 'log':
                     nloss = _proba_entropy(refitted_proba)
+                else:
+                    raise Exception("unknown loss")
 
                 expected_error[x_idx] += np.sum(nloss)*X_proba[x_idx, y_idx]
 
