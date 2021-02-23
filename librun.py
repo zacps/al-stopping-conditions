@@ -96,11 +96,18 @@ def run(
     backend="loky",
     abort=True,
     workers=None,
-    metrics=None
+    metrics=None,
+    fragment_id=None,
+    fragment_length=1
 ):
-    __progress_hack()
+    if fragment_id is None:
+        __progress_hack()
     configurations = Configurations(matrix)
     start = monotonic()
+    
+    # For NeSI
+    if fragment_id is not None:
+        configurations = configurations[fragment_id:fragment_id+fragment_length]
 
     if workers is None:
         workers = os.cpu_count()
@@ -123,7 +130,7 @@ def run(
     except Exception as e:
         duration = monotonic()-start
         
-        top = inspect.stack()[-1]
+        top = inspect.stack()[1]
         filename = os.path.basename(top.filename)
         requests.post(
             'https://discord.com/api/webhooks/809248326485934080/aIHL726wKxk42YpDI_GtjsqfAWuFplO3QrXoza1r55XRT9-Ao9Rt8sBtexZ-WXSPCtsv', 
@@ -133,8 +140,8 @@ def run(
     
     duration = monotonic()-start
     
-    if duration > 10*60:
-        top = inspect.stack()[-1]
+    if duration > 10*60 or fragment_id is not None:
+        top = inspect.stack()[1]
         filename = os.path.basename(top.filename)
         requests.post(
             'https://discord.com/api/webhooks/809248326485934080/aIHL726wKxk42YpDI_GtjsqfAWuFplO3QrXoza1r55XRT9-Ao9Rt8sBtexZ-WXSPCtsv', 
@@ -151,16 +158,6 @@ def plot(results, plot_robustness=False, key=None, series=None, title=None, ret=
             config_result[0].dataset_mutator_name,
             getattr(config_result[0], "model_name", None),
         )
-    #if isinstance(results[0][1], list):
-    #    print("Deaggregated")
-    #    for i in range(len(results)):
-    #        print(type(results[i][0][0]))
-    #        print(type(results[i][0][1:]))
-    #        merged = pd.concat([results[i][1][0]] + [x for x in results[i][1][1:]])
-    #        averaged = merged.groupby(merged.index).mean()
-    #        sem = merged.groupby(merged.index).sem()
-    #        sem.columns = [str(col) + "_stderr" for col in sem.columns]
-    #        results[i] = pd.concat([averaged, sem], axis=1)
     if series is None:
         series = lambda config: config.method_name
     if title is None:
@@ -207,6 +204,7 @@ def plot(results, plot_robustness=False, key=None, series=None, title=None, ret=
                 plt.suptitle(title(config))
 
         fig.legend()
+        fig.tight_layout()
     if ret:
         return figaxes
 
@@ -271,7 +269,7 @@ def __run_inner(config, force_cache=False, force_run=False, backend="loky", abor
             accuracy_score,
             f1_score,
             roc_auc_score,
-            empirical_robustness,
+            #empirical_robustness,
             "time"
         ]
         
@@ -322,7 +320,7 @@ def __run_inner(config, force_cache=False, force_run=False, backend="loky", abor
                 backend=backend,
             )(
                 delayed(
-                    lambda dataset, method: MyActiveLearner(
+                    lambda dataset, method, i: MyActiveLearner(
                         metrics=metrics_measures
                     ).active_learn2(
                         # It's important that the split is re-randomised per run.
@@ -341,8 +339,10 @@ def __run_inner(config, force_cache=False, force_run=False, backend="loky", abor
                         ret_classifiers=config.meta.get("ret_classifiers", False),
                         stop_info=config.meta.get("stop_info", False),
                         stop_function=config.meta.get("stop_function", ("default", lambda learner: False))[1],
+                        config_str=config.serialize(),
+                        i=i
                     )
-                )(config.dataset(), config.method)
+                )(config.dataset(), config.method, i)
                 for i in range(config.meta["n_runs"])
             )
             metrics = [mc[0] for mc in metrics_classifiers]
@@ -356,6 +356,11 @@ def __run_inner(config, force_cache=False, force_run=False, backend="loky", abor
         if config.meta.get("aggregate", True):
             metrics = metrics[0].average2(metrics[1:])
         __write_result(config, metrics)
+        for i in range(config.meta['n_runs']):
+            try:
+                os.remove(f"cache/runs/{config_str}_{i}.pickle")
+            except FileNotFound:
+                pass
         if config.meta.get("ret_classifiers", False):
             __write_classifiers(config, classifiers)
 
@@ -448,3 +453,11 @@ def __progress_hack():
     """
         )
     )
+
+
+def __free_cpus(pesimistic=False):
+    """
+    Count the number of free CPU cores.
+    """
+    rounder = math.floor if pesimistic else math.ceil
+    return rounder((100*psutil.cpu_count()-psutil.cpu_percent(interval=1))/100)

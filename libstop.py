@@ -104,15 +104,42 @@ def SC_oracle_acc_mcs(x, classifiers, threshold=0.9, **kwargs):
     return accx[np.argmax(np.array(acc_)[1:] >= threshold)+1]
 
 
-def SC_mes(x, expected_error, threshold=0, **kwargs):
+def SC_mes(x, expected_error_min, threshold=1e-2, **kwargs):
     """
     Determine a stopping point based on the expected error of the classifier is below a
     threshold.
     
     https://www.aclweb.org/anthology/I08-1048.pdf
     """
+    
+    return x.iloc[np.argmax(expected_error_min <= threshold) or -1]
 
-    return x[np.argmax(expected_error <= threshold)]
+
+def ZPS_ee(x, expected_error_min, threshold=5e-2, **kwargs):
+    # WARN: This is slightly omniscient, but not in a way that should matter.
+    # TODO: FIX IT!
+    return x.iloc[np.argmax(expected_error_min <= threshold*np.max(expected_error_min))]
+
+
+def ZPS_ee_grad(x, expected_error_min, threshold=10, **kwargs):
+    grad = np.array(no_ahead_tvregdiff(expected_error_min[1:], 1, 1e-1, plotflag=False, diagflag=False))
+    
+    second = np.array([np.nan, np.nan, np.nan, *no_ahead_tvregdiff(grad[2:], 1, 15, plotflag=False, diagflag=False)])
+    
+    start = np.argmax(second < 0)
+    
+    return x.iloc[(np.argmax(second[start:] >= threshold)+start) or -1]
+
+
+def ZPS_ee_grad_sub(x, expected_error_min, threshold=10, subsample=1, **kwargs):
+    expected_error_min_sub = expected_error_min[1::subsample]
+    grad = np.array(no_ahead_tvregdiff(expected_error_min_sub, 1, 1e-1, plotflag=False, diagflag=False))
+    
+    second = np.array(no_ahead_tvregdiff(grad[2:], 1, 15, plotflag=False, diagflag=False))
+    
+    start = np.argmax(second < 0)
+    
+    return x.iloc[1::subsample][2:][(np.argmax(second[start:] >= threshold)+start) or -1]
 
 
 def EVM(x, uncertainty_variance, uncertainty_variance_selected, selected=True, n=2, m=1e-3, **kwargs):

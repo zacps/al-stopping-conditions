@@ -317,7 +317,7 @@ class MyActiveLearner:
         stop_info=False,
         compress=False,
         config_str=None,
-        i=i
+        i=None
     ) -> Tuple[list, list]:
         """
         Perform active learning on the given dataset, querying data with the given query strategy.
@@ -325,23 +325,21 @@ class MyActiveLearner:
         Returns metrics describing the performance of the query strategy, and optionally all classifiers trained during learning.
         """
         
-        #cached = __restore_run(config_str, i)
-        #if cached is not None:
-        #    return cached
+        cached = _restore_run(config_str, i)
+        if cached is not None:
+            return cached
 
-        learner = self.__setup_learner(
-            X_labelled, Y_labelled, query_strategy, model=model
-        )
-        
-        classifiers = []
-        
-        if ret_classifiers:
-            classifiers.append(deepcopy(learner))
-
-        self.metrics.collect(X_labelled.shape[0], learner.estimator, Y_test, X_test)
-
-        if self.animate:
-            self.__animation_frame(learner, X_unlabelled)
+        checkpoint = _restore_checkpoint(config_str, i)
+        if checkpoint is None:
+            learner = self.__setup_learner(
+                X_labelled, Y_labelled, query_strategy, model=model
+            )
+            classifiers = []
+            if ret_classifiers:
+                classifiers.append(deepcopy(learner))
+            self.metrics.collect(X_labelled.shape[0], learner.estimator, Y_test, X_test)
+        else:
+            learner, self.metrics, X_unlabelled, Y_oracle = checkpoint
 
         while X_unlabelled.shape[0] != 0 and not stop_function(learner):
             t_start = time.monotonic()
@@ -384,25 +382,19 @@ class MyActiveLearner:
                 X_unlabelled=X_unlabelled,
                 **extra_metrics
             )
-
-            if self.animate:
-                self.__animation_frame(learner, X_unlabelled)
                 
             if ret_classifiers:
                 classifiers.append(deepcopy(learner))
                 
-        if self.animate:
-            animation = self.cam.animate(interval=500, repeat_delay=1000)
-            if self.animation_file is not None:
-                animation.save(animation_file)
-            display(HTML(animation.to_html5_video()))
-            plt.close(self.fig)
-
+            _checkpoint(config_str, i, (learner, self.metrics, X_unlabelled, Y_oracle))
+                
         if not ret_classifiers:
-            #__write_run(config_str, i, self.metrics)
+            _write_run(config_str, i, self.metrics)
+            _cleanup_checkpoint(config_str, i)
             return (self.metrics, None)
         else:
-            #__write_run(config_str, i, self.metrics, classifiers)
+            _write_run(config_str, i, self.metrics, classifiers)
+            _cleanup_checkpoint(config_str, i)
             return (self.metrics, zlib.compress(pickle.dumps(classifiers)) if compress else classifiers)
 
     def active_learn_query_synthesis(
@@ -514,6 +506,45 @@ class MyActiveLearner:
 
         return self.metrics
 
+    
+def _checkpoint(config_str, i, data):
+    file = f"cache/checkpoints/{config_str}_{i}.pickle"
+    with open(file, "wb") as f:
+        pickle.dump(data, f)
+    
+
+def _restore_checkpoint(config_str, i):
+    file = f"cache/checkpoints/{config_str}_{i}.pickle"
+    try:
+        with open(file, "rb") as f:
+            return pickle.load(f)
+    except FileNotFoundError:
+        return None
+    
+    
+def _cleanup_checkpoint(config_str, i):
+    file = f"cache/checkpoints/{config_str}_{i}.pickle"
+    try:
+        os.remove(file)
+    except FileNotFoundError:
+        pass
+
+
+def _write_run(config_str, i, metrics):
+    file = f"cache/runs/{config_str}_{i}.csv"
+    with open(file, "w") as f:
+        metrics.frame.to_csv(f)
+
+
+def _restore_run(config_str, i):
+    file = f"cache/runs/{config_str}_{i}.csv"
+    try:
+        with open(file, "r") as f:
+            metrics = pd.read_csv(f, index_col=0)
+    except FileNotFoundError:
+        return None
+    return metrics
+        
     
 class BeamClf:
     def __init__(self, X_labelled, y_labelled, X_unlabelled, y_unlabelled, X_test, y_test):

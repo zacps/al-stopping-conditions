@@ -54,35 +54,39 @@ class Metrics:
 
         result = {}
         unique_labels = unique_labels or np.unique(labels)
+            
+        predict = clf.predict(test_set)
+        predict_proba = clf.predict_proba(test_set)
+        
         for metric in self.metrics:
             if metric == f1_score:
                 result[metric.__name__] = f1_score(
                     labels,
-                    clf.predict(test_set),
+                    predict,
                     average="micro" if len(unique_labels) > 2 else "binary",
                     pos_label=unique_labels[1] if len(unique_labels) <= 2 else 1,
                 )
             elif metric == roc_auc_score:
                 if len(np.unique(labels)) > 2 or len(labels.shape) > 1:
                     result[metric.__name__] = roc_auc_score(
-                        labels, clf.predict_proba(test_set), multi_class="ovr"
+                        labels, predict_proba, multi_class="ovr"
                     )
                 else:
                     result[metric.__name__] = roc_auc_score(
-                        labels, clf.predict_proba(test_set)[:, 1]
+                        labels, predict_proba[:, 1]
                     )
             elif metric == empirical_robustness:
                 result[metric.__name__] = empirical_robustness(
                     ScikitlearnSVC(clf), test_set, "fgsm", attack_params={"eps": 0.2}
                 )
             elif metric == "accuracy_train":
-                result[metric.__name__] = accuracy_score(labels, clf.predict(test_set))
+                result[metric.__name__] = accuracy_score(labels, predict)
             elif metric == "n_support":
                 result[metric] = np.sum(clf.n_support_)
             elif isinstance(metric, str):
                 result[metric] = kwargs.get(metric, None)
             else:
-                result[metric.__name__] = metric(labels, clf.predict(test_set))
+                result[metric.__name__] = metric(labels, predict)
 
         self.frame = self.frame.append({"x": x, **result}, ignore_index=True)
 

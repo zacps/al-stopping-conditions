@@ -2,11 +2,14 @@ import tarfile
 import pickle
 import glob
 from functools import partial
+import requests, zipfile, io
+from os.path import exists
 
 import pandas as pd
 import numpy as np
 import sklearn
 from sklearn.model_selection import train_test_split
+from sklearn.tree import DecisionTreeClassifier
 from sklearn import datasets
 from sklearn.datasets import fetch_openml
 from tabulate import tabulate
@@ -289,7 +292,7 @@ def bbbp(dataset_size=1000):
     https://linkinghub.elsevier.com/retrieve/pii/S001048252030528X
     """
     
-    dataset = pd.read_csv(r"F:\Downloads\compound_datasets\collection\BloodBrainBarrierPenetration\dataset_cddd.csv", header=0)
+    dataset = pd.read_csv(r"datasets/bbbp/dataset_cddd.csv", header=0)
     X = dataset.iloc[:,2:514].to_numpy()
     y = dataset["penetration"].to_numpy()
     
@@ -605,11 +608,13 @@ def smartphone(dataset_size=1000):
     y_train = pd.read_csv('datasets/smartphone/Train/y_train.txt')
     y_test = pd.read_csv('datasets/smartphone/Test/y_test.txt')
     
+    X = np.concatenate((X_train.to_numpy(), X_test.to_numpy()), axis=0)
+    y = np.concatenate((y_train.to_numpy(), y_test.to_numpy()), axis=0)
+    
     if dataset_size is not None:
         X, _, y, _ = train_test_split(X, y, train_size=dataset_size, random_state=42)
 
-    return (np.concatenate((X_train.to_numpy(), X_test.to_numpy()), axis=0), 
-            np.concatenate((y_train.to_numpy(), y_test.to_numpy()), axis=0))
+    return X, y
 
 
 @source("https://archive.ics.uci.edu/ml/datasets/Covertype")
@@ -619,8 +624,8 @@ def covertype(dataset_size=1000):
     """
     
     data = pd.read_csv('https://archive.ics.uci.edu/ml/machine-learning-databases/covtype/covtype.data.gz', header=None)
-    y = data.iloc[:,-1]
-    X = data.iloc[:,0:-1]
+    y = data.iloc[:,-1].to_numpy()
+    X = data.iloc[:,0:-1].to_numpy()
     
     if dataset_size is not None:
         X, _, y, _ = train_test_split(X, y, train_size=dataset_size, random_state=42)
@@ -631,8 +636,8 @@ def covertype(dataset_size=1000):
 @domain("physical")
 def htru2(dataset_size=1000):
     data = pd.read_csv('datasets/HTRU2/HTRU_2.csv', header=None)
-    y = data.iloc[:,-1]
-    X = data.iloc[:,0:-1]
+    y = data.iloc[:,-1].to_numpy()
+    X = data.iloc[:,0:-1].to_numpy()
     
     if dataset_size is not None:
         X, _, y, _ = train_test_split(X, y, train_size=dataset_size, random_state=42)
@@ -640,29 +645,40 @@ def htru2(dataset_size=1000):
     return X, y
 
 
-@domain("computer")
-def ida2016(dataset_size=1000):
-    test = pd.read_csv('datasets/IDA2016Challenge/aps_failure_test_set.csv', header=14, sep=',')
-    train = pd.read_csv('datasets/IDA2016Challenge/aps_failure_training_set.csv', header=14, sep=',')
-    
-    y = np.concatenate((test.iloc[:,0].to_numpy(), train.iloc[:,0].to_numpy()))
-    X = np.concatenate((test.iloc[:,1:].to_numpy(), train.iloc[:,1:].to_numpy()))
-    
-    if dataset_size is not None:
-        X, _, y, _ = train_test_split(X, y, train_size=dataset_size, random_state=42)
-        
-    return X, y
+# Doesn't contain enough rows if excluding missing values.
+#@domain("computer")
+#def ida2016(dataset_size=1000):
+#    test = pd.read_csv('datasets/IDA2016Challenge/aps_failure_test_set.csv', header=14, sep=',')
+#    train = pd.read_csv('datasets/IDA2016Challenge/aps_failure_training_set.csv', header=14, sep=',')
+#    
+#    y = np.concatenate((test.iloc[:,0].to_numpy(), train.iloc[:,0].to_numpy()))
+#    X = np.concatenate((test.iloc[:,1:].to_numpy(), train.iloc[:,1:].to_numpy()))
+#    
+#    # filter missing values
+#    idx = np.all(X!='na',axis=1)
+#    X = X[idx]
+#    y = y[idx]
+#    
+#    if dataset_size is not None:
+#        X, _, y, _ = train_test_split(X, y, train_size=dataset_size, random_state=42)
+#        
+#    return X, y
 
 
 @source("https://archive.ics.uci.edu/ml/datasets/Detect+Malware+Types")
 @domain("computer")
 def malware(dataset_size=1000):
-    data = pd.read_csv('datasets/malware/staDynVt2955Lab.csv')
-    X = data.iloc[:,0:-1]
-    y = data.iloc[:,-1]
+    cols = set(pd.read_csv('datasets/malware/staDynVt2955Lab.csv').columns) & set(pd.read_csv('datasets/malware/staDynVxHeaven2698Lab.csv').columns) & set(pd.read_csv('datasets/malware/staDynBenignLab.csv').columns)
+    
+    files = ['datasets/malware/staDynVt2955Lab.csv', 'datasets/malware/staDynBenignLab.csv', 'datasets/malware/staDynVxHeaven2698Lab.csv']
+    
+    data = pd.concat([pd.read_csv(file)[cols] for file in files])
+    
+    y = data.label
+    X = data.drop('label', axis=1)
     
     if dataset_size is not None:
-        X, _, y, _ = train_test_split(X, y, train_size=dataset_size, random_state=42)
+        X, _, y, _ = train_test_split(X.to_numpy(), y.to_numpy(), train_size=dataset_size, random_state=42)
         
     return X, y
 
@@ -677,7 +693,9 @@ def bidding(dataset_size=1000):
     y = data.iloc[:,-1]
     
     if dataset_size is not None:
-        X, _, y, _ = train_test_split(X, y, train_size=dataset_size, random_state=42)
+        X, _, y, _ = train_test_split(X.to_numpy(), y.to_numpy(), train_size=dataset_size, random_state=42)
+        
+    X = sklearn.preprocessing.OneHotEncoder().fit_transform(X)
         
     return X, y
 
@@ -685,11 +703,176 @@ def bidding(dataset_size=1000):
 @source("https://archive.ics.uci.edu/ml/datasets/Swarm+Behaviour")
 def swarm(dataset_size=1000, predict='flocking'):
     data = pd.read_csv(f'datasets/swarm/{predict.capitalize()}.csv')
-    X = data.iloc[:,0:-1]
-    y = data.iloc[:,-1]
+    data = data.drop(24015)
+    data.x1 = data.x1.astype(float)
+    X = data.iloc[:,0:-1].to_numpy()
+    y = data.iloc[:,-1].to_numpy()
     
     if dataset_size is not None:
         X, _, y, _ = train_test_split(X, y, train_size=dataset_size, random_state=42)
         
     return X, y
     
+    
+@source('https://archive.ics.uci.edu/ml/datasets/Bank+Marketing')
+def bank(dataset_size=1000):
+    r = requests.get('https://archive.ics.uci.edu/ml/machine-learning-databases/00222/bank.zip', stream=True)
+    with zipfile.ZipFile(io.BytesIO(r.content)) as z:
+        data = pd.read_csv(z.open('bank-full.csv'), sep=';')
+    
+    X = data.iloc[:,0:-1]
+    X = sklearn.preprocessing.OneHotEncoder().fit_transform(X)
+    
+    y = data.iloc[:,-1]
+    
+    if dataset_size is not None:
+        X, _, y, _ = train_test_split(X, y, train_size=dataset_size, random_state=42)
+        
+    return X, y
+
+
+@source('https://archive.ics.uci.edu/ml/datasets/Anuran+Calls+%28MFCCs%29')
+def anuran(dataset_size=1000):
+    r = requests.get('https://archive.ics.uci.edu/ml/machine-learning-databases/00406/Anuran%20Calls%20(MFCCs).zip', stream=True)
+    with zipfile.ZipFile(io.BytesIO(r.content)) as z:
+        data = pd.read_csv(z.open('Frogs_MFCCs.csv'))
+    y = data.Species.to_numpy()
+    X = data.iloc[:,:-4].to_numpy()
+    
+    if dataset_size is not None:
+        X, _, y, _ = train_test_split(X, y, train_size=dataset_size, random_state=42)
+        
+    return X, y
+
+
+@source("https://archive.ics.uci.edu/ml/datasets/Avila")
+def avila(dataset_size=1000):
+    r = requests.get('https://archive.ics.uci.edu/ml/machine-learning-databases/00459/avila.zip', stream=True)
+    with zipfile.ZipFile(io.BytesIO(r.content)) as z:
+        data1 = pd.read_csv(z.open('avila/avila-tr.txt'), header=None)
+        data2 = pd.read_csv(z.open('avila/avila-ts.txt'), header=None)
+    data = pd.concat((data1, data2))
+    y = data.iloc[:,-1].to_numpy()
+    X = data.iloc[:,:-1].to_numpy()
+    
+    if dataset_size is not None:
+        X, _, y, _ = train_test_split(X, y, train_size=dataset_size, random_state=42)
+        
+    return X, y
+
+
+@source('https://archive.ics.uci.edu/ml/datasets/Bach+Choral+Harmony')
+def coral(dataset_size=1000):
+    r = requests.get('https://archive.ics.uci.edu/ml/machine-learning-databases/00298/jsbach_chorals_harmony.zip', stream=True)
+    
+    with zipfile.ZipFile(io.BytesIO(r.content)) as z:
+        data = pd.read_csv(z.open('jsbach_chorals_harmony.data'), header=None)
+    
+    y = data.iloc[:,-1]
+    X = data.iloc[:,:-1]
+    
+    if dataset_size is not None:
+        X, _, y, _ = train_test_split(X, y, train_size=dataset_size, random_state=42)
+        
+    return X, y
+    
+    
+@source('http://ama.liglab.fr/resourcestools/datasets/buzz-prediction-in-social-media/')
+def buzz(site, dataset_size=1000):
+    path = 'datasets/buzz/classification.tar.gz'
+    if not exists(path):
+        r = requests.get('http://ama.liglab.fr/data/buzz/classification.tar.gz', stream=True)
+        with open(path, 'wb') as f:
+            f.write(r.content)
+    with tarfile.open(path, mode="r:") as z:
+        data_th = pd.read_csv(z.extractfile('classification/TomsHardware/Absolute_labeling/TomsHardware-Absolute-Sigma-500.data'), header=None)
+        data_tw = pd.read_csv(z.extractfile('classification/Twitter/Absolute_labeling/Twitter-Absolute-Sigma-500.data'), header=None)
+        
+    if site == 'th':
+        data = data_th
+    elif site == 'tw':
+        data = data_tw
+    else:
+        raise Exception('Invalid site, must be "th" or "tw"')
+    
+    y = data.iloc[:,-1]
+    X = data.iloc[:,:-1]
+    
+    if dataset_size is not None:
+        X, _, y, _ = train_test_split(X, y, train_size=dataset_size, random_state=42)
+        
+    return X, y
+
+
+@source('https://archive.ics.uci.edu/ml/datasets/Dataset+for+Sensorless+Drive+Diagnosis')
+def sensorless(dataset_size=1000):
+    data = pd.read_csv('https://archive.ics.uci.edu/ml/machine-learning-databases/00325/Sensorless_drive_diagnosis.txt', sep=' ', header=None)
+    X = data.iloc[:,:-1].to_numpy()
+    y = data.iloc[:,-1].to_numpy()
+    
+    if dataset_size is not None:
+        X, _, y, _ = train_test_split(X, y, train_size=dataset_size, random_state=42)
+        
+    return X, y
+
+
+@source('https://archive.ics.uci.edu/ml/datasets/Dota2+Games+Results')
+def dota2(dataset_size=1000):
+    r = requests.get('https://archive.ics.uci.edu/ml/machine-learning-databases/00367/dota2Dataset.zip', stream=True)
+    
+    with zipfile.ZipFile(io.BytesIO(r.content)) as z:
+        data1 = pd.read_csv(z.open('dota2Test.csv'), header=None)
+        data2 = pd.read_csv(z.open('dota2Train.csv'), header=None)
+        
+    data = pd.concat((data1,data2))
+    
+    y = data.iloc[:,0].to_numpy()
+    X = data.iloc[:,1:].to_numpy()
+    
+    if dataset_size is not None:
+        X, _, y, _ = train_test_split(X, y, train_size=dataset_size, random_state=42)
+    
+    return X,y
+
+
+#@source('https://archive.ics.uci.edu/ml/datasets/FMA%3A+A+Dataset+For+Music+Analysis')
+#def fma(dataset_size=1000):
+#    path = 'datasets/fma/fma_metadata.zip'
+#    if not exists(path):
+#        r = requests.get('https://os.unil.cloud.switch.ch/fma/fma_metadata.zip', stream=True)
+#        with open(path, 'wb') as f:
+#            f.write(r.content)
+#    with zipfile.ZipFile(path) as z:
+#        tracks = pd.read_csv(z.open('fma_metadata/tracks.csv'))
+#        features = pd.read_csv(z.open('fma_metadata/features.csv'))
+#    return tracks, features
+
+
+@source('https://archive.ics.uci.edu/ml/datasets/Gas+Sensor+Array+Drift+Dataset')
+def gas(dataset_size=1000):
+    path = 'datasets/gas/Dataset.zip'
+    url = 'https://archive.ics.uci.edu/ml/machine-learning-databases/00224/Dataset.zip'
+    if not exists(path):
+        r = requests.get(url, stream=True)
+        with open(path, 'wb') as f:
+            f.write(r.content)
+    with zipfile.ZipFile(path) as z:
+        datas = [datasets.load_svmlight_file(z.open(f'Dataset/batch{i}.dat')) for i in range(1,11)]
+        X = np.concatenate([data[0].todense() for data in datas])
+        y = np.concatenate([data[1] for data in datas])
+        
+    if dataset_size is not None:
+        X, _, y, _ = train_test_split(X, y, train_size=dataset_size, random_state=42)
+        
+    return X, y
+    
+    
+def bias_dataset(X_train, X_test, y_train, y_test, rand=None, **kwargs):
+    clf = DecisionTreeClassifier()
+    clf.fit(X_train,y_train)
+    feature_idx = np.argmax(clf.feature_importances_)
+    median = np.median(X_train[:,feature_idx])
+    lower = lower = np.nonzero(X_train[:,feature_idx]<median)[0]
+    keep = rand.choice(lower, lower.shape[0] // 10)
+    idx = np.concatenate((keep, np.nonzero(X_train[:,feature_idx]>=median)[0]))
+    return X_train[idx], X_test, y_train[idx], y_test

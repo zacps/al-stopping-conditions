@@ -74,13 +74,28 @@ def uncertainty_stop(
     X,
     n_instances,
     metric = 'euclidean',
-    n_jobs=None,
+    n_jobs=1,
     **uncertainty_measure_kwargs,
 ):
     from modAL.batch import ranked_batch
     from modAL.uncertainty import classifier_uncertainty, classifier_entropy
-    uncertainty = classifier_uncertainty(clf, X, **uncertainty_measure_kwargs)
-    entropy = classifier_entropy(clf, X, **uncertainty_measure_kwargs)
+    
+    if n_jobs == 1:
+        uncertainty = classifier_uncertainty(clf, X, **uncertainty_measure_kwargs)
+        entropy = classifier_entropy(clf, X, **uncertainty_measure_kwargs)
+    else:
+        uncertainty = np.concatenate(np.array(Parallel()(delayed(classifier_uncertainty)(
+            clf, 
+            chunk, 
+            **uncertainty_measure_kwargs
+        ) for chunk in np.array_split(X, n_jobs))), axis=0)
+        entropy = np.concatenate(np.array(Parallel()(delayed(classifier_entropy)(
+            clf, 
+            chunk, 
+            **uncertainty_measure_kwargs
+        ) for chunk in np.array_split(X, n_jobs))), axis=0)
+        
+    
     query_indices = ranked_batch(clf, unlabeled=X, uncertainty_scores=uncertainty,
          n_instances=n_instances, metric=metric, n_jobs=n_jobs)
     metrics = {
