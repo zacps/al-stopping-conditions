@@ -557,7 +557,7 @@ scipy = ">=0.13.2"
 
 [[package]]
 name = "secml"
-version = "0.14.dev0+309b38f2"
+version = "0.14.dev0+6172940"
 description = "A library for Secure and Explainable Machine Learning"
 category = "main"
 optional = false
@@ -584,7 +584,7 @@ unittests = ["pytest (>=5,<5.1)", "pytest-cov (>=2.9)", "coverage (<5)", "jupyte
 type = "git"
 url = "https://gitlab.com/secml/secml.git"
 reference = "master"
-resolved_reference = "309b38f2c1c72b4d540080dd17d723ed052a5b58"
+resolved_reference = "0617294001a1d1a641c532cd3dda268b4a683e88"
 
 [[package]]
 name = "six"

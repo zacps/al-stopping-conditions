@@ -3,7 +3,9 @@ import time
 from copy import deepcopy
 import pickle
 import zlib
+import os
 
+import pandas as pd
 import matplotlib.pyplot as plt
 from matplotlib.patches import ConnectionPatch
 import numpy as np
@@ -327,7 +329,8 @@ class MyActiveLearner:
         
         cached = _restore_run(config_str, i)
         if cached is not None:
-            return cached
+            print("Cached run ret")
+            return (cached, None)
 
         checkpoint = _restore_checkpoint(config_str, i)
         if checkpoint is None:
@@ -388,12 +391,13 @@ class MyActiveLearner:
                 
             _checkpoint(config_str, i, (learner, self.metrics, X_unlabelled, Y_oracle))
                 
+        print("Normal run ret")
         if not ret_classifiers:
             _write_run(config_str, i, self.metrics)
             _cleanup_checkpoint(config_str, i)
             return (self.metrics, None)
         else:
-            _write_run(config_str, i, self.metrics, classifiers)
+            _write_run(config_str, i, self.metrics) # TODO: Write classifiers?
             _cleanup_checkpoint(config_str, i)
             return (self.metrics, zlib.compress(pickle.dumps(classifiers)) if compress else classifiers)
 
@@ -530,20 +534,19 @@ def _cleanup_checkpoint(config_str, i):
         pass
 
 
-def _write_run(config_str, i, metrics):
+def _write_run(config_str, i, data):
     file = f"cache/runs/{config_str}_{i}.csv"
-    with open(file, "w") as f:
-        metrics.frame.to_csv(f)
+    with open(file, "wb") as f:
+        pickle.dump(data, f)
 
 
 def _restore_run(config_str, i):
     file = f"cache/runs/{config_str}_{i}.csv"
     try:
-        with open(file, "r") as f:
-            metrics = pd.read_csv(f, index_col=0)
+        with open(file, "rb") as f:
+            return pickle.load(f)
     except FileNotFoundError:
         return None
-    return metrics
         
     
 class BeamClf:

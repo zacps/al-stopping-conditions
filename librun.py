@@ -353,13 +353,14 @@ def __run_inner(config, force_cache=False, force_run=False, backend="loky", abor
                 raise e
             print("WARN: Experiment failed, continuing anyway")
             return (config, None)
+        
         if config.meta.get("aggregate", True):
             metrics = metrics[0].average2(metrics[1:])
         __write_result(config, metrics)
         for i in range(config.meta['n_runs']):
             try:
-                os.remove(f"cache/runs/{config_str}_{i}.pickle")
-            except FileNotFound:
+                os.remove(f"cache/runs/{config_str}_{i}.csv")
+            except FileNotFoundError:
                 pass
         if config.meta.get("ret_classifiers", False):
             __write_classifiers(config, classifiers)
