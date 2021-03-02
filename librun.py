@@ -21,14 +21,15 @@ import matplotlib.pyplot as plt
 from IPython.core.display import HTML, display
 from libutil import ProgressParallel
 from joblib import delayed
-from libactive import active_split, MyActiveLearner
-from libadversarial import random_batch
 from modAL import batch
 from sklearn.metrics import accuracy_score, f1_score, roc_auc_score
 from sklearn import metrics as skmetrics
 from sklearn.utils import check_random_state
 from art.metrics import empirical_robustness
 from tabulate import tabulate
+
+from libactive import active_split, MyActiveLearner, CompressedStore
+from libadversarial import random_batch
 
 
 @dataclass
@@ -127,6 +128,9 @@ def run(
             )
             for config in configurations
         )
+        if configurations.meta['ret_classifiers']:
+            classifiers = [__read_classifiers(config, i) for i, config in enumerate(configurations)]
+            results = list(zip(results, classifiers))
     except Exception as e:
         duration = monotonic()-start
         
@@ -281,22 +285,15 @@ def __run_inner(config, force_cache=False, force_run=False, backend="loky", abor
     try:
         try:
             cached_config, metrics = __read_result(f"cache/{config.serialize()}.csv", config)
-            if config.meta.get("ret_classifiers"):
-                classifiers = __read_classifiers(config)
         except FileNotFoundError as e:
             if config.model_name == None or config.model_name == "svm-linear":
                 cached_config, metrics = __read_result(f"cache/{config.serialize_no_model()}.csv", config)
                 cached_config.model_name = "svm-linear"
-                if config.meta.get("ret_classifiers"):
-                    classifiers = __read_classifiers(config)
             else:
                 raise e
         if force_run:
             raise FileNotFoundError()
-        if not config.meta.get("ret_classifiers", False):
-            return (cached_config, metrics)
-        else:
-            return ((cached_config, metrics), classifiers)
+        return (cached_config, metrics)
 
     except (FileNotFoundError, EOFError, pd.errors.EmptyDataError):
         if force_cache:
@@ -312,7 +309,7 @@ def __run_inner(config, force_cache=False, force_run=False, backend="loky", abor
             # It is however *variant* with each run.
             random_state = check_random_state(42)
             
-            metrics_classifiers = ProgressParallel(
+            metrics = ProgressParallel(
                 n_jobs=min(config.meta["n_runs"], workers),
                 total=config.meta["n_runs"],
                 desc=f"Run",
@@ -340,13 +337,12 @@ def __run_inner(config, force_cache=False, force_run=False, backend="loky", abor
                         stop_info=config.meta.get("stop_info", False),
                         stop_function=config.meta.get("stop_function", ("default", lambda learner: False))[1],
                         config_str=config.serialize(),
-                        i=i
+                        i=i,
+                        pool_subsamble=config.meta.get("pool_subsample", None)
                     )
                 )(config.dataset(), config.method, i)
                 for i in range(config.meta["n_runs"])
             )
-            metrics = [mc[0] for mc in metrics_classifiers]
-            classifiers = [mc[1] for mc in metrics_classifiers]
             
         except Exception as e:
             if abort:
@@ -359,16 +355,12 @@ def __run_inner(config, force_cache=False, force_run=False, backend="loky", abor
         __write_result(config, metrics)
         for i in range(config.meta['n_runs']):
             try:
-                os.remove(f"cache/runs/{config_str}_{i}.csv")
+                os.remove(f"cache/runs/{config.serialize()}_{i}.csv")
             except FileNotFoundError:
                 pass
-        if config.meta.get("ret_classifiers", False):
-            __write_classifiers(config, classifiers)
 
-    if not config.meta.get("ret_classifiers", False):
-        return (config, metrics)
-    else:
-        return ((config, metrics), classifiers)
+    
+    return (config, metrics)
 
 
 def __write_result(config, result):
@@ -392,10 +384,14 @@ def __write_classifiers(config, classifiers):
     with open(file, "wb") as f:
         pickle.dump(classifiers, f)
         
-def __read_classifiers(config):
-    file = f"cache/classifiers/{config.serialize()}.pickle"
-    with open(file, "rb") as f:
-        return pickle.load(f)
+def __read_classifiers(config, i=None):
+    pfile = f"cache/classifiers/{config.serialize()}.pickle"
+    zfile = f"cache/classifiers/{config.serialize()}_{i}.zip"
+    try:
+        with open(pfile, "rb") as f:
+            return pickle.load(f)
+    except FileNotFoundError:
+        return CompressedStore(zfile)
 
 def __read_result(file, config):
     if config.meta.get("aggregate", True):

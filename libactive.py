@@ -4,6 +4,8 @@ from copy import deepcopy
 import pickle
 import zlib
 import os
+import zipfile
+from contextlib import contextmanager
 
 import pandas as pd
 import matplotlib.pyplot as plt
@@ -319,7 +321,8 @@ class MyActiveLearner:
         stop_info=False,
         compress=False,
         config_str=None,
-        i=None
+        i=None,
+        pool_subsample=None
     ) -> Tuple[list, list]:
         """
         Perform active learning on the given dataset, querying data with the given query strategy.
@@ -327,79 +330,91 @@ class MyActiveLearner:
         Returns metrics describing the performance of the query strategy, and optionally all classifiers trained during learning.
         """
         
+        unique_labels = np.unique(Y_test)
+        
         cached = _restore_run(config_str, i)
         if cached is not None:
-            print("Cached run ret")
-            return (cached, None)
+            return cached
 
         checkpoint = _restore_checkpoint(config_str, i)
         if checkpoint is None:
             learner = self.__setup_learner(
                 X_labelled, Y_labelled, query_strategy, model=model
             )
-            classifiers = []
-            if ret_classifiers:
-                classifiers.append(deepcopy(learner))
             self.metrics.collect(X_labelled.shape[0], learner.estimator, Y_test, X_test)
         else:
             learner, self.metrics, X_unlabelled, Y_oracle = checkpoint
-
-        while X_unlabelled.shape[0] != 0 and not stop_function(learner):
-            t_start = time.monotonic()
-            if not stop_info:
-                query_idx, query_points = learner.query(X_unlabelled)
-                extra_metrics = {}
-            else:
-                query_idx, query_points, extra_metrics = learner.query(X_unlabelled)
-            t_elapsed = time.monotonic() - t_start
             
-            if "expected_error" in self.metrics.metrics:
-                extra_metrics['expected_error'] = expected_error(learner, X_unlabelled)
-            if "contradictory_information" in self.metrics.metrics:
-                # https://stackoverflow.com/questions/32074239/sklearn-getting-distance-of-each-point-from-decision-boundary
-                predictions = learner.predict(query_points)
-                uncertainties = classifier_uncertainty(learner.estimator, query_points)
-
-            if query_points is not None and getattr(query_strategy, "is_adversarial", False):
-                learner.teach(query_points, Y_oracle[query_idx])
-
-            learner.teach(X_unlabelled[query_idx], Y_oracle[query_idx])
-            
-            if "contradictory_information" in self.metrics.metrics:
-                contradictory_information = np.sum(uncertainties[predictions != Y_oracle[query_idx]]/np.mean(uncertainties))
-                extra_metrics['contradictory_information'] = contradictory_information
-
-            if isinstance(X_unlabelled, csr_matrix):
-                X_unlabelled = delete_from_csr(X_unlabelled, row_indices=query_idx)
-            else:
-                X_unlabelled = np.delete(X_unlabelled, query_idx, axis=0)
-                
-            Y_oracle = np.delete(Y_oracle, query_idx, axis=0)
-
-            self.metrics.collect(
-                self.metrics.frame.x.iloc[-1] + len(query_idx),
-                learner.estimator,
-                Y_test,
-                X_test,
-                time=t_elapsed,
-                X_unlabelled=X_unlabelled,
-                **extra_metrics
-            )
-                
-            if ret_classifiers:
+        with store(f"cache/classifiers/{config_str}_{i}.zip", enable=ret_classifiers) as classifiers:
+            if ret_classifiers and len(classifiers) == 0:
                 classifiers.append(deepcopy(learner))
+
+            while X_unlabelled.shape[0] != 0 and not stop_function(learner):
+                # QUERY  ------------------------------------------------------------------------------------------------------------------------------------------
                 
-            _checkpoint(config_str, i, (learner, self.metrics, X_unlabelled, Y_oracle))
+                # TODO: Should this random be seeded?
+                X_subsampled = X_unlabelled[np.random.choice(X_unlabelled.shape[0], pool_subsample, replace=False)] if pool_subsample is not None else X_unlabelled
+                t_start = time.monotonic()
+                if not stop_info:
+                    query_idx, query_points = learner.query(X_subsampled)
+                    extra_metrics = {}
+                else:
+                    query_idx, query_points, extra_metrics = learner.query(X_subsampled)
+                t_elapsed = time.monotonic() - t_start
                 
-        print("Normal run ret")
-        if not ret_classifiers:
-            _write_run(config_str, i, self.metrics)
-            _cleanup_checkpoint(config_str, i)
-            return (self.metrics, None)
-        else:
-            _write_run(config_str, i, self.metrics) # TODO: Write classifiers?
-            _cleanup_checkpoint(config_str, i)
-            return (self.metrics, zlib.compress(pickle.dumps(classifiers)) if compress else classifiers)
+                # PRE METRICS  -----------------------------------------------------------------------------------------------------------------------------------
+
+                if "expected_error" in self.metrics.metrics:
+                    extra_metrics['expected_error'] = expected_error(
+                        learner, 
+                        X_subsampled,
+                        unique_labels=unique_labels
+                    )
+                if "contradictory_information" in self.metrics.metrics:
+                    # https://stackoverflow.com/questions/32074239/sklearn-getting-distance-of-each-point-from-decision-boundary
+                    predictions = learner.predict(query_points)
+                    uncertainties = classifier_uncertainty(learner.estimator, query_points)
+                    
+                # TRAIN  ------------------------------------------------------------------------------------------------------------------------------------------
+
+                if query_points is not None and getattr(query_strategy, "is_adversarial", False):
+                    learner.teach(query_points, Y_oracle[query_idx])
+
+                learner.teach(X_unlabelled[query_idx], Y_oracle[query_idx])
+                
+                # POST METRICS  -----------------------------------------------------------------------------------------------------------------------------------
+
+                if "contradictory_information" in self.metrics.metrics:
+                    contradictory_information = np.sum(uncertainties[predictions != Y_oracle[query_idx]]/np.mean(uncertainties))
+                    extra_metrics['contradictory_information'] = contradictory_information
+
+                # Replace with non-copying slice?
+                if isinstance(X_unlabelled, csr_matrix):
+                    X_unlabelled = delete_from_csr(X_unlabelled, row_indices=query_idx)
+                else:
+                    X_unlabelled = np.delete(X_unlabelled, query_idx, axis=0)
+
+                Y_oracle = np.delete(Y_oracle, query_idx, axis=0)
+
+                self.metrics.collect(
+                    self.metrics.frame.x.iloc[-1] + len(query_idx),
+                    learner.estimator,
+                    Y_test,
+                    X_test,
+                    time=t_elapsed,
+                    X_unlabelled=X_subsampled,
+                    unique_labels=unique_labels,
+                    **extra_metrics
+                )
+
+                if ret_classifiers:
+                    classifiers.append(deepcopy(learner))
+
+                _checkpoint(config_str, i, (learner, self.metrics, X_unlabelled, Y_oracle))
+                
+        _write_run(config_str, i, self.metrics)
+        _cleanup_checkpoint(config_str, i)
+        return self.metrics
 
     def active_learn_query_synthesis(
         self,
@@ -547,7 +562,56 @@ def _restore_run(config_str, i):
             return pickle.load(f)
     except FileNotFoundError:
         return None
+    
+    
+@contextmanager
+def store(filename, enable):
+    if enable:
+        inner = CompressedStore(filename)
+        try:
+            yield inner
+        finally:
+            inner.close()
+    else:
+        yield None
         
+    
+class CompressedStore:
+    """
+    A compressed, progressively writable object store. Writes individual objects as files in a zip archive.
+    Can be read lazily and iterated/indexed as if it were a container.
+    
+    During writing use the context manager `store` to ensure all changes are reflected.
+    """
+    
+    def __init__(self, filename):
+        self.zip = zipfile.ZipFile(filename, 'a', compression=zipfile.ZIP_DEFLATED)
+        self.i = len(self.zip.namelist())
+        
+    def append(self, obj):
+        self.i+=1
+        self.zip.writestr(str(self.i), pickle.dumps(obj))
+        
+    def __len__(self):
+        return self.i
+    
+    def __getitem__(self, i):
+        if i < 0:
+            i = self.i - i
+        try:
+            return pickle.loads(self.zip.open(str(i)))
+        except KeyError:
+            return IndexError(f"index {i} out of range for store of length {self.i}")
+        
+    def __iter__(self):
+        i = 0
+        while i < self.i:
+            yield self[i]
+            i += 1
+        
+    def close(self):
+        self.zip.close()
+    
     
 class BeamClf:
     def __init__(self, X_labelled, y_labelled, X_unlabelled, y_unlabelled, X_test, y_test):
@@ -666,17 +730,13 @@ def interactive_img_oracle(images):
         classes.append(int(klass))
     return np.array(classes)
 
-def expected_error(learner, X, predict_proba=None, p_subsample=1.0):
+def expected_error(learner, X, predict_proba=None, p_subsample=1.0, unique_labels=None):
     loss = 'binary'
     
     expected_error = np.zeros(shape=(X.shape[0], ))
-    possible_labels = np.unique(learner.y_training)
+    possible_labels = unique_labels or np.unique(learner.y_training)
 
-    try:
-        X_proba = predict_proba or learner.predict_proba(X)
-    except NotFittedError:
-        # TODO: implement a proper cold-start
-        return 0, X[0]
+    X_proba = predict_proba or learner.predict_proba(X)
 
     cloned_estimator = clone(learner.estimator)
 
@@ -697,12 +757,8 @@ def expected_error(learner, X, predict_proba=None, p_subsample=1.0):
 
                 cloned_estimator.fit(X_new, y_new)
                 refitted_proba = cloned_estimator.predict_proba(X_reduced)
-                if loss == 'binary':
-                    nloss = _proba_uncertainty(refitted_proba)
-                elif loss == 'log':
-                    nloss = _proba_entropy(refitted_proba)
-                else:
-                    raise Exception("unknown loss")
+                
+                nloss = _proba_uncertainty(refitted_proba)
 
                 expected_error[x_idx] += np.sum(nloss)*X_proba[x_idx, y_idx]
 
