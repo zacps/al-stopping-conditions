@@ -101,6 +101,22 @@ def active_split_query_synthesis(X, Y, test_size=0.5, labeled_size=0.1, shuffle=
 class MyActiveLearner:
     def __init__(
         self,
+        X_labelled,
+        X_unlabelled,
+        Y_labelled,
+        Y_oracle,
+        X_test,
+        Y_test,
+        query_strategy,
+
+        stop_function=lambda learner: False,
+        ret_classifiers=False,
+        stop_info=False,
+        config_str=None,
+        i=None,
+        pool_subsample=None
+
+        model="svm-linear",
         animate=False,
         metrics=None,
         poison=False,
@@ -108,6 +124,24 @@ class MyActiveLearner:
         lb=None,
         ub=None,
     ):
+        self.X_labelled = X_labelled
+        self.X_unlabelled = X_unlabelled
+        self.Y_labelled = Y_labelled
+        self.Y_oracle = Y_oracle
+        self.X_test = X_test
+        self.Y_test = Y_test
+        self.query_strategy = query_strategy
+        
+        self.unique_labels = np.unique(Y_test),
+        
+        self.stop_function = stop_function
+        self.ret_classifiers = ret_classifiers
+        self.stop_info = stop_info
+        self.config_str = config_str
+        self.i = i
+        self.pool_subsample = pool_subsample
+        self.model = model
+        
         self.animate = animate
         self.metrics = Metrics(metrics=metrics)
         self.animation_file = animation_file
@@ -123,86 +157,86 @@ class MyActiveLearner:
                 self.fig, self.ax = plt.subplots(1, 1, figsize=(10, 10))
             self.cam = Camera(self.fig)
 
-    def __setup_learner(self, X_labelled, Y_labelled, query_strategy, model):
-        if model == "svm-linear":
+    def __setup_learner(self):
+        if self.model == "svm-linear":
             return ActiveLearner(
                 estimator=SVC(kernel="linear", probability=True),
-                X_training=X_labelled,
-                y_training=Y_labelled,
-                query_strategy=query_strategy,
+                X_training=self.X_labelled,
+                y_training=self.Y_labelled,
+                query_strategy=self.query_strategy,
             )
-        elif model == "thunder-svm-linear":
+        elif self.model == "thunder-svm-linear":
             return ActiveLearner(
                 estimator=ThunderSVC(kernel="linear", probability=True),
-                X_training=X_labelled,
-                y_training=Y_labelled,
-                query_strategy=query_strategy,
+                X_training=self.X_labelled,
+                y_training=self.Y_labelled,
+                query_strategy=self.query_strategy,
             )
-        elif model == "svm-rbf":
+        elif self.model == "svm-rbf":
             return ActiveLearner(
                 estimator=SVC(kernel="rbf", probability=True),
-                X_training=X_labelled,
-                y_training=Y_labelled,
-                query_strategy=query_strategy,
+                X_training=self.X_labelled,
+                y_training=self.Y_labelled,
+                query_strategy=self.query_strategy,
             )
-        elif model == "svm-poly":
+        elif self.model == "svm-poly":
             return ActiveLearner(
                 estimator=SVC(kernel="poly", probability=True),
-                X_training=X_labelled,
-                y_training=Y_labelled,
-                query_strategy=query_strategy,
+                X_training=self.X_labelled,
+                y_training=self.Y_labelled,
+                query_strategy=self.query_strategy,
             )
-        elif model == "random-forest":
+        elif self.model == "random-forest":
             return ActiveLearner(
                 estimator=RandomForestClassifier(),
-                X_training=X_labelled,
-                y_training=Y_labelled,
-                query_strategy=query_strategy,
+                X_training=self.X_labelled,
+                y_training=self.Y_labelled,
+                query_strategy=self.query_strategy,
             )
-        elif model == "gaussian-nb":
+        elif self.model == "gaussian-nb":
             return ActiveLearner(
                 estimator=GaussianNB(),
-                X_training=X_labelled,
-                y_training=Y_labelled,
-                query_strategy=query_strategy,
+                X_training=self.X_labelled,
+                y_training=self.Y_labelled,
+                query_strategy=self.query_strategy,
             )
-        elif model == "k-neighbors":
+        elif self.model == "k-neighbors":
             return ActiveLearner(
                 estimator=KNeighborsClassifier(),
-                X_training=X_labelled,
-                y_training=Y_labelled,
-                query_strategy=query_strategy,
+                X_training=self.X_labelled,
+                y_training=self.Y_labelled,
+                query_strategy=self.query_strategy,
             )
-        elif model == "perceptron":
+        elif self.model == "perceptron":
             return ActiveLearner(
                 estimator=Perceptron(),
-                X_training=X_labelled,
-                y_training=Y_labelled,
-                query_strategy=query_strategy,
+                X_training=self.X_labelled,
+                y_training=self.Y_labelled,
+                query_strategy=self.query_strategy,
             )
-        elif model == "committee":
+        elif self.model == "committee":
             return Committee(
                 learner_list=[
                     ActiveLearner(
                         estimator=SVC(kernel="linear", probability=True),
-                        X_training=X_labelled,
-                        y_training=Y_labelled,
+                        X_training=self.X_labelled,
+                        y_training=self.Y_labelled,
                     ),
                     # committee: logistic regression, svm-linear, svm-rbf, guassian process classifier
                     ActiveLearner(
                         estimator=SVC(kernel="rbf", probability=True),
-                        X_training=X_labelled,
-                        y_training=Y_labelled,
+                        X_training=self.X_labelled,
+                        y_training=self.Y_labelled,
                     ),
                     ActiveLearner(
                         estimator=GaussianProcessClassifier(),
-                        X_training=X_labelled,
-                        y_training=Y_labelled,
+                        X_training=self.X_labelled,
+                        y_training=self.Y_labelled,
                     ),
                     ActiveLearner(
                         estimator=LogisticRegression(),
-                        X_training=X_labelled,
-                        y_training=Y_labelled,
+                        X_training=self.X_labelled,
+                        y_training=self.Y_labelled,
                     ),
                 ],
                 query_strategy=disagreement.vote_entropy_sampling,
@@ -307,22 +341,6 @@ class MyActiveLearner:
 
     def active_learn2(
         self,
-        X_labelled,
-        X_unlabelled,
-        Y_labelled,
-        Y_oracle,
-        X_test,
-        Y_test,
-        query_strategy,
-        model="svm-linear",
-        teach_advesarial=False,
-        stop_function=lambda learner: False,
-        ret_classifiers=False,
-        stop_info=False,
-        compress=False,
-        config_str=None,
-        i=None,
-        pool_subsample=None
     ) -> Tuple[list, list]:
         """
         Perform active learning on the given dataset, querying data with the given query strategy.
@@ -330,91 +348,97 @@ class MyActiveLearner:
         Returns metrics describing the performance of the query strategy, and optionally all classifiers trained during learning.
         """
         
-        unique_labels = np.unique(Y_test)
-        
-        cached = _restore_run(config_str, i)
+        # If this experiment run has been completed previously return the saved result
+        cached = _restore_run()
         if cached is not None:
             return cached
 
+        # Attempt to restore a checkpoint
         checkpoint = _restore_checkpoint(config_str, i)
+        
         if checkpoint is None:
-            learner = self.__setup_learner(
-                X_labelled, Y_labelled, query_strategy, model=model
-            )
-            self.metrics.collect(X_labelled.shape[0], learner.estimator, Y_test, X_test)
+            self.learner = self.__setup_learner()
+            self.metrics.collect(self.X_labelled.shape[0], self.learner.estimator, self.Y_test, self.X_test)
         else:
-            learner, self.metrics, X_unlabelled, Y_oracle = checkpoint
+            self = checkpoint
             
-        with store(f"cache/classifiers/{config_str}_{i}.zip", enable=ret_classifiers) as classifiers:
-            if ret_classifiers and len(classifiers) == 0:
+        # Classifiers are stored as a local and explicitly restored as they need to be compressed before being stored.
+        with store(f"cache/classifiers/{self.config_str}_{self.i}.zip", enable=self.ret_classifiers) as classifiers:
+            if self.ret_classifiers and len(classifiers) == 0:
                 classifiers.append(deepcopy(learner))
 
-            while X_unlabelled.shape[0] != 0 and not stop_function(learner):
-                # QUERY  ------------------------------------------------------------------------------------------------------------------------------------------
+            while self.X_unlabelled.shape[0] != 0 and not self.stop_function(self.learner):
+                self.active_learn_iter()
                 
-                # TODO: Should this random be seeded?
-                X_subsampled = X_unlabelled[np.random.choice(X_unlabelled.shape[0], pool_subsample, replace=False)] if pool_subsample is not None else X_unlabelled
-                t_start = time.monotonic()
-                if not stop_info:
-                    query_idx, query_points = learner.query(X_subsampled)
-                    extra_metrics = {}
-                else:
-                    query_idx, query_points, extra_metrics = learner.query(X_subsampled)
-                t_elapsed = time.monotonic() - t_start
-                
-                # PRE METRICS  -----------------------------------------------------------------------------------------------------------------------------------
-
-                if "expected_error" in self.metrics.metrics:
-                    extra_metrics['expected_error'] = expected_error(
-                        learner, 
-                        X_subsampled,
-                        unique_labels=unique_labels
-                    )
-                if "contradictory_information" in self.metrics.metrics:
-                    # https://stackoverflow.com/questions/32074239/sklearn-getting-distance-of-each-point-from-decision-boundary
-                    predictions = learner.predict(query_points)
-                    uncertainties = classifier_uncertainty(learner.estimator, query_points)
-                    
-                # TRAIN  ------------------------------------------------------------------------------------------------------------------------------------------
-
-                if query_points is not None and getattr(query_strategy, "is_adversarial", False):
-                    learner.teach(query_points, Y_oracle[query_idx])
-
-                learner.teach(X_unlabelled[query_idx], Y_oracle[query_idx])
-                
-                # POST METRICS  -----------------------------------------------------------------------------------------------------------------------------------
-
-                if "contradictory_information" in self.metrics.metrics:
-                    contradictory_information = np.sum(uncertainties[predictions != Y_oracle[query_idx]]/np.mean(uncertainties))
-                    extra_metrics['contradictory_information'] = contradictory_information
-
-                # Replace with non-copying slice?
-                if isinstance(X_unlabelled, csr_matrix):
-                    X_unlabelled = delete_from_csr(X_unlabelled, row_indices=query_idx)
-                else:
-                    X_unlabelled = np.delete(X_unlabelled, query_idx, axis=0)
-
-                Y_oracle = np.delete(Y_oracle, query_idx, axis=0)
-
-                self.metrics.collect(
-                    self.metrics.frame.x.iloc[-1] + len(query_idx),
-                    learner.estimator,
-                    Y_test,
-                    X_test,
-                    time=t_elapsed,
-                    X_unlabelled=X_subsampled,
-                    unique_labels=unique_labels,
-                    **extra_metrics
-                )
-
-                if ret_classifiers:
-                    classifiers.append(deepcopy(learner))
-
-                _checkpoint(config_str, i, (learner, self.metrics, X_unlabelled, Y_oracle))
-                
-        _write_run(config_str, i, self.metrics)
-        _cleanup_checkpoint(config_str, i)
+        # Write the experiment run results and cleanup intermediate checkpoints
+        self._write_run(self.metrics)
+        self._cleanup_checkpoint()
         return self.metrics
+    
+    
+    def active_learn_iter():
+        # QUERY  ------------------------------------------------------------------------------------------------------------------------------------------
+
+        # TODO: Should this random be seeded?
+        X_subsampled = self.X_unlabelled[np.random.choice(self.X_unlabelled.shape[0], self.pool_subsample, replace=False)] if self.pool_subsample is not None else self.X_unlabelled
+        t_start = time.monotonic()
+        if not self.stop_info:
+            query_idx, query_points = self.learner.query(self.X_subsampled)
+            extra_metrics = {}
+        else:
+            query_idx, query_points, extra_metrics = self.learner.query(self.X_subsampled)
+        t_elapsed = time.monotonic() - t_start
+
+        # PRE METRICS  -----------------------------------------------------------------------------------------------------------------------------------
+
+        if "expected_error" in self.metrics.metrics:
+            extra_metrics['expected_error'] = expected_error(
+                self.learner, 
+                X_subsampled,
+                unique_labels=self.unique_labels
+            )
+        if "contradictory_information" in self.metrics.metrics:
+            # https://stackoverflow.com/questions/32074239/sklearn-getting-distance-of-each-point-from-decision-boundary
+            predictions = self.learner.predict(query_points)
+            uncertainties = classifier_uncertainty(self.learner.estimator, query_points)
+
+        # TRAIN  ------------------------------------------------------------------------------------------------------------------------------------------
+
+        if query_points is not None and getattr(self.query_strategy, "is_adversarial", False):
+            self.learner.teach(query_points, self.Y_oracle[query_idx])
+
+        self.learner.teach(self.X_unlabelled[query_idx], self.Y_oracle[query_idx])
+
+        # POST METRICS  -----------------------------------------------------------------------------------------------------------------------------------
+
+        if "contradictory_information" in self.metrics.metrics:
+            contradictory_information = np.sum(uncertainties[predictions != self.Y_oracle[query_idx]]/np.mean(uncertainties))
+            extra_metrics['contradictory_information'] = contradictory_information
+
+        # Replace with non-copying slice?
+        if isinstance(self.X_unlabelled, csr_matrix):
+            self.X_unlabelled = delete_from_csr(self.X_unlabelled, row_indices=query_idx)
+        else:
+            self.X_unlabelled = np.delete(self.X_unlabelled, query_idx, axis=0)
+
+        self.Y_oracle = np.delete(self.Y_oracle, query_idx, axis=0)
+
+        self.metrics.collect(
+            self.metrics.frame.x.iloc[-1] + len(query_idx),
+            self.learner.estimator,
+            self.Y_test,
+            self.X_test,
+            time=t_elapsed,
+            X_unlabelled=X_subsampled,
+            unique_labels=self.unique_labels,
+            **extra_metrics
+        )
+
+        if ret_classifiers:
+            classifiers.append(deepcopy(self.learner))
+
+        _checkpoint(self)
+        
 
     def active_learn_query_synthesis(
         self,
@@ -526,42 +550,42 @@ class MyActiveLearner:
         return self.metrics
 
     
-def _checkpoint(config_str, i, data):
-    file = f"cache/checkpoints/{config_str}_{i}.pickle"
-    with open(file, "wb") as f:
-        pickle.dump(data, f)
-    
-
-def _restore_checkpoint(config_str, i):
-    file = f"cache/checkpoints/{config_str}_{i}.pickle"
-    try:
-        with open(file, "rb") as f:
-            return pickle.load(f)
-    except FileNotFoundError:
-        return None
-    
-    
-def _cleanup_checkpoint(config_str, i):
-    file = f"cache/checkpoints/{config_str}_{i}.pickle"
-    try:
-        os.remove(file)
-    except FileNotFoundError:
-        pass
+    def _checkpoint(data):
+        file = f"cache/checkpoints/{self.config_str}_{self.i}.pickle"
+        with open(file, "wb") as f:
+            pickle.dump(data, f)
 
 
-def _write_run(config_str, i, data):
-    file = f"cache/runs/{config_str}_{i}.csv"
-    with open(file, "wb") as f:
-        pickle.dump(data, f)
+    def _restore_checkpoint():
+        file = f"cache/checkpoints/{self.config_str}_{self.i}.pickle"
+        try:
+            with open(file, "rb") as f:
+                return pickle.load(f)
+        except FileNotFoundError:
+            return None
 
 
-def _restore_run(config_str, i):
-    file = f"cache/runs/{config_str}_{i}.csv"
-    try:
-        with open(file, "rb") as f:
-            return pickle.load(f)
-    except FileNotFoundError:
-        return None
+    def _cleanup_checkpoint():
+        file = f"cache/checkpoints/{self.config_str}_{self.i}.pickle"
+        try:
+            os.remove(file)
+        except FileNotFoundError:
+            pass
+
+
+    def _write_run(data):
+        file = f"cache/runs/{self.config_str}_{self.i}.csv"
+        with open(file, "wb") as f:
+            pickle.dump(data, f)
+
+
+    def _restore_run():
+        file = f"cache/runs/{self.config_str}_{self.i}.csv"
+        try:
+            with open(file, "rb") as f:
+                return pickle.load(f)
+        except FileNotFoundError:
+            return None
     
     
 @contextmanager
