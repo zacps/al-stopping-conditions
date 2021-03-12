@@ -90,6 +90,7 @@ class Configurations:
         return len(self.configurations)
 
 
+# TODO: Add profiling support?
 def run(
     matrix,
     force_cache=False,
@@ -99,7 +100,8 @@ def run(
     workers=None,
     metrics=None,
     fragment_id=None,
-    fragment_length=1
+    fragment_length=1,
+    fragment_run=None
 ):
     if fragment_id is None:
         __progress_hack()
@@ -109,7 +111,14 @@ def run(
     # For NeSI
     if fragment_id is not None:
         configurations = configurations[fragment_id:fragment_id+fragment_length]
+        
+    # Monomorphise parametric meta parameters
+    for config in configurations:
+        for k, v in config.meta.items():
+            if isinstance(v, dict):
+                config.meta[k] = v.get(config.dataset_name, v["*"])
 
+    # Detect number of available CPUs
     if workers is None:
         workers = os.cpu_count()
         if "sched_getaffinity" in dir(os):
@@ -175,6 +184,8 @@ def plot(results, plot_robustness=False, key=None, series=None, title=None, ret=
         figaxes.append((fig, axes))
 
         for config, result in group:
+            if isinstance(result, list):
+                result = result[0].average2(result[1:])
             for i, ax in enumerate(axes.flatten()[:-extra if extra != 0 else len(axes.flatten())]):
                 try:
                     i_stderr = result.columns.get_loc("accuracy_score_stderr")
@@ -276,11 +287,6 @@ def __run_inner(config, force_cache=False, force_run=False, backend="loky", abor
             #empirical_robustness,
             "time"
         ]
-        
-    # Monomorphise parametric meta parameters
-    for k, v in config.meta.items():
-        if isinstance(v, dict):
-            config.meta[k] = v.get(config.dataset_name, v["*"])
     
     try:
         try:
@@ -318,8 +324,6 @@ def __run_inner(config, force_cache=False, force_run=False, backend="loky", abor
             )(
                 delayed(
                     lambda dataset, method, i: MyActiveLearner(
-                        metrics=metrics_measures
-                    ).active_learn2(
                         # It's important that the split is re-randomised per run.
                         *active_split(
                             *dataset, 
@@ -332,14 +336,15 @@ def __run_inner(config, force_cache=False, force_run=False, backend="loky", abor
                             i=i
                         ),
                         method,
+                        metrics=metrics_measures,
                         model=config.model_name.lower(),
                         ret_classifiers=config.meta.get("ret_classifiers", False),
                         stop_info=config.meta.get("stop_info", False),
                         stop_function=config.meta.get("stop_function", ("default", lambda learner: False))[1],
                         config_str=config.serialize(),
                         i=i,
-                        pool_subsamble=config.meta.get("pool_subsample", None)
-                    )
+                        pool_subsample=config.meta.get("pool_subsample", None)
+                    ).active_learn2()
                 )(config.dataset(), config.method, i)
                 for i in range(config.meta["n_runs"])
             )

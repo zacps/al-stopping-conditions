@@ -53,7 +53,7 @@ class Metrics:
         """
 
         result = {}
-        unique_labels = unique_labels or np.unique(labels)
+        unique_labels = unique_labels if unique_labels is not None else np.unique(labels)
             
         predict = clf.predict(test_set)
         predict_proba = clf.predict_proba(test_set)
@@ -103,3 +103,4 @@ class Metrics:
         sem = merged.groupby(merged.index).sem()
         sem.columns = [str(col) + "_stderr" for col in sem.columns]
         return pd.concat([averaged, sem], axis=1)
+    

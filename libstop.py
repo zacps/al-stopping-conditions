@@ -76,10 +76,6 @@ def optimal_fixed(x, accuracy_score, f1_score, roc_auc_score, threshold=0.99, **
     return x[np.argmax((accuracy_score>=np.max(accuracy_score)*threshold) & (roc_auc_score>=np.max(roc_auc_score)*threshold))] # & (f1_score>=np.max(f1_score)*threshold)
 
 
-def SP(stop_set, **kwargs):
-    pass
-
-
 def SC_entropy_mcs(x, entropy_max, threshold=0.01, **kwargs):
     """
     Determine a stopping point based on when *all* samples in the unlabelled pool are
@@ -338,6 +334,7 @@ def kappa_metric(x, classifiers, k=3, **kwargs):
     for i, clf in enumerate(classifiers[k-1:]):
         clfs = [*[classifiers[-i] for i in range(1, k)], clf]
         
+        # FIXME: Shouldn't this be clf.predict(clfs[-1].X_training) ?
         kappa = fleiss_kappa(np.sum([OneHotEncoder().fit_transform(clf.predict(classifiers[-1].X_training).reshape(-1, 1)).todense() for clf in clfs], axis=0))
         out.append(kappa)
 
@@ -346,7 +343,6 @@ def kappa_metric(x, classifiers, k=3, **kwargs):
 
 def hyperplane_similarity(classifiers, nth='last'):
     """
-    
     Returns shape (len(classifiers), (n_classes*(n_classes-1)//2))
     """
     from numpy.linalg import norm

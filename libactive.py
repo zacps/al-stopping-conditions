@@ -7,6 +7,7 @@ import os
 import zipfile
 from contextlib import contextmanager
 
+import dill
 import pandas as pd
 import matplotlib.pyplot as plt
 from matplotlib.patches import ConnectionPatch
@@ -44,7 +45,7 @@ except Exception:
     pass
 
 
-def active_split(X, Y, test_size=0.5, labeled_size=0.1, shuffle=True, ensure_y=False, random_state=None, mutator=lambda *args: args, config_str=None, i=None):
+def active_split(X, Y, test_size=0.5, labeled_size=0.1, shuffle=True, ensure_y=False, random_state=None, mutator=lambda *args, **kwargs: args, config_str=None, i=None):
     """
     Split data into three sets:
     * Labeled training set (0.1)
@@ -59,7 +60,7 @@ def active_split(X, Y, test_size=0.5, labeled_size=0.1, shuffle=True, ensure_y=F
     X_labelled, X_unlabelled, Y_labelled, Y_oracle = train_test_split(
         X_train,
         Y_train,
-        test_size=(1 - labeled_size / test_size),
+        test_size=(1 - labeled_size / test_size) if labeled_size < 1 and test_size < 1 else Y_train.shape[0] - labeled_size,
         shuffle=shuffle,
         random_state=random_state,
     )
@@ -114,7 +115,7 @@ class MyActiveLearner:
         stop_info=False,
         config_str=None,
         i=None,
-        pool_subsample=None
+        pool_subsample=None,
 
         model="svm-linear",
         animate=False,
@@ -132,7 +133,7 @@ class MyActiveLearner:
         self.Y_test = Y_test
         self.query_strategy = query_strategy
         
-        self.unique_labels = np.unique(Y_test),
+        self.unique_labels = np.unique(Y_test)
         
         self.stop_function = stop_function
         self.ret_classifiers = ret_classifiers
@@ -339,9 +340,7 @@ class MyActiveLearner:
             c="white",
         )
 
-    def active_learn2(
-        self,
-    ) -> Tuple[list, list]:
+    def active_learn2(self) -> Tuple[list, list]:
         """
         Perform active learning on the given dataset, querying data with the given query strategy.
 
@@ -349,12 +348,12 @@ class MyActiveLearner:
         """
         
         # If this experiment run has been completed previously return the saved result
-        cached = _restore_run()
+        cached = self._restore_run()
         if cached is not None:
             return cached
 
         # Attempt to restore a checkpoint
-        checkpoint = _restore_checkpoint(config_str, i)
+        checkpoint = self._restore_checkpoint()
         
         if checkpoint is None:
             self.learner = self.__setup_learner()
@@ -365,10 +364,16 @@ class MyActiveLearner:
         # Classifiers are stored as a local and explicitly restored as they need to be compressed before being stored.
         with store(f"cache/classifiers/{self.config_str}_{self.i}.zip", enable=self.ret_classifiers) as classifiers:
             if self.ret_classifiers and len(classifiers) == 0:
-                classifiers.append(deepcopy(learner))
+                classifiers.append(deepcopy(self.learner))
 
             while self.X_unlabelled.shape[0] != 0 and not self.stop_function(self.learner):
-                self.active_learn_iter()
+                if self.pool_subsample is not None:
+                    # TODO: Should this random be seeded?
+                    self.X_subsampled = self.X_unlabelled[np.random.choice(self.X_unlabelled.shape[0], self.pool_subsample, replace=False)] 
+                else:
+                    self.X_subsampled = self.X_unlabelled
+                
+                self.active_learn_iter(classifiers)
                 
         # Write the experiment run results and cleanup intermediate checkpoints
         self._write_run(self.metrics)
@@ -376,11 +381,8 @@ class MyActiveLearner:
         return self.metrics
     
     
-    def active_learn_iter():
+    def active_learn_iter(self, classifiers):
         # QUERY  ------------------------------------------------------------------------------------------------------------------------------------------
-
-        # TODO: Should this random be seeded?
-        X_subsampled = self.X_unlabelled[np.random.choice(self.X_unlabelled.shape[0], self.pool_subsample, replace=False)] if self.pool_subsample is not None else self.X_unlabelled
         t_start = time.monotonic()
         if not self.stop_info:
             query_idx, query_points = self.learner.query(self.X_subsampled)
@@ -391,12 +393,15 @@ class MyActiveLearner:
 
         # PRE METRICS  -----------------------------------------------------------------------------------------------------------------------------------
 
+        t_ee_start = time.monotonic()
         if "expected_error" in self.metrics.metrics:
             extra_metrics['expected_error'] = expected_error(
                 self.learner, 
-                X_subsampled,
+                self.X_subsampled,
                 unique_labels=self.unique_labels
             )
+        extra_metrics['time_ee'] = time.monotonic() - t_ee_start
+            
         if "contradictory_information" in self.metrics.metrics:
             # https://stackoverflow.com/questions/32074239/sklearn-getting-distance-of-each-point-from-decision-boundary
             predictions = self.learner.predict(query_points)
@@ -422,6 +427,12 @@ class MyActiveLearner:
             self.X_unlabelled = np.delete(self.X_unlabelled, query_idx, axis=0)
 
         self.Y_oracle = np.delete(self.Y_oracle, query_idx, axis=0)
+        
+        if self.pool_subsample is not None:
+            # TODO: Should this random be seeded?
+            self.X_subsampled = self.X_unlabelled[np.random.choice(self.X_unlabelled.shape[0], self.pool_subsample, replace=False)] 
+        else:
+            self.X_subsampled = self.X_unlabelled
 
         self.metrics.collect(
             self.metrics.frame.x.iloc[-1] + len(query_idx),
@@ -429,15 +440,15 @@ class MyActiveLearner:
             self.Y_test,
             self.X_test,
             time=t_elapsed,
-            X_unlabelled=X_subsampled,
+            X_unlabelled=self.X_subsampled,
             unique_labels=self.unique_labels,
             **extra_metrics
         )
 
-        if ret_classifiers:
+        if self.ret_classifiers:
             classifiers.append(deepcopy(self.learner))
 
-        _checkpoint(self)
+        self._checkpoint(self)
         
 
     def active_learn_query_synthesis(
@@ -550,22 +561,22 @@ class MyActiveLearner:
         return self.metrics
 
     
-    def _checkpoint(data):
+    def _checkpoint(self, data):
         file = f"cache/checkpoints/{self.config_str}_{self.i}.pickle"
         with open(file, "wb") as f:
-            pickle.dump(data, f)
+            dill.dump(data, f)
 
 
-    def _restore_checkpoint():
+    def _restore_checkpoint(self):
         file = f"cache/checkpoints/{self.config_str}_{self.i}.pickle"
         try:
             with open(file, "rb") as f:
-                return pickle.load(f)
+                return dill.load(f)
         except FileNotFoundError:
             return None
 
 
-    def _cleanup_checkpoint():
+    def _cleanup_checkpoint(self):
         file = f"cache/checkpoints/{self.config_str}_{self.i}.pickle"
         try:
             os.remove(file)
@@ -573,13 +584,13 @@ class MyActiveLearner:
             pass
 
 
-    def _write_run(data):
+    def _write_run(self, data):
         file = f"cache/runs/{self.config_str}_{self.i}.csv"
         with open(file, "wb") as f:
             pickle.dump(data, f)
 
 
-    def _restore_run():
+    def _restore_run(self):
         file = f"cache/runs/{self.config_str}_{self.i}.csv"
         try:
             with open(file, "rb") as f:
@@ -758,7 +769,7 @@ def expected_error(learner, X, predict_proba=None, p_subsample=1.0, unique_label
     loss = 'binary'
     
     expected_error = np.zeros(shape=(X.shape[0], ))
-    possible_labels = unique_labels or np.unique(learner.y_training)
+    possible_labels = unique_labels if unique_labels is not None else np.unique(learner.y_training)
 
     X_proba = predict_proba or learner.predict_proba(X)
 
@@ -777,6 +788,7 @@ def expected_error(learner, X, predict_proba=None, p_subsample=1.0, unique_label
                     X_new = scipy.sparse.vstack((learner.X_training, X[[x_idx]]))
                 else:
                     X_new = data_vstack((learner.X_training, np.expand_dims(X[x_idx], axis=0)))
+            
                 y_new = data_vstack((learner.y_training, np.array(y).reshape(1,)))
 
                 cloned_estimator.fit(X_new, y_new)
