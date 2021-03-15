@@ -1,26 +1,24 @@
-from typing import Tuple, Union, Callable
+from typing import Tuple, Callable
 import time
 from copy import deepcopy
 import pickle
-import zlib
 import os
 import zipfile
-import io
 from contextlib import contextmanager
 
+import sklearn
 import dill
-import pandas as pd
 import matplotlib.pyplot as plt
-from matplotlib.patches import ConnectionPatch
 import numpy as np
 from celluloid import Camera
-from IPython.core.display import HTML, display
-from modAL import batch, density, disagreement, uncertainty, utils
+try:
+    from IPython.core.display import display
+except ModuleNotFoundError:
+    pass
+from modAL import disagreement
 from modAL.models import ActiveLearner, Committee
-from sklearn import datasets, metrics, tree
 from sklearn.gaussian_process import GaussianProcessClassifier
 from sklearn.linear_model import LogisticRegression
-from sklearn.metrics import accuracy_score, f1_score, roc_auc_score
 from sklearn.model_selection import train_test_split
 from joblib import Parallel, delayed
 from scipy.sparse import csr_matrix
@@ -31,11 +29,9 @@ from sklearn.linear_model import Perceptron
 from sklearn.base import clone
 from sklearn.svm import SVC
 from modAL.utils.data import data_vstack
-from modAL.utils.selection import multi_argmax
-from modAL.uncertainty import _proba_uncertainty, _proba_entropy, classifier_uncertainty
+from modAL.uncertainty import _proba_uncertainty, classifier_uncertainty
 import scipy
 
-from libadversarial import fgm, deepfool
 from libplot import plot_classification, plot_poison, c_plot_poison
 from libutil import Metrics
 
@@ -555,13 +551,6 @@ class MyActiveLearner:
                 )
                 self.cam.snap()
 
-        if self.animate:
-            animation = self.cam.animate(interval=500, repeat_delay=1000)
-            if self.animation_file is not None:
-                animation.save(animation_file)
-            display(HTML(animation.to_html5_video()))
-            plt.close(self.fig)
-
         if track_flips:
             print(
                 f"{oracle_matched_poison} of {total_labels} had equal oracle and poison attack labels"
@@ -839,7 +828,7 @@ def expected_error_online(learner, X, predict_proba=None, p_subsample=1.0, uniqu
             # estimate the expected error
             for y_idx, y in enumerate(possible_labels):
                 cloned_estimator = clone(base_estimator)
-                clonsed_estimator.partial_fit(X[[x_idx]], y)
+                cloned_estimator.partial_fit(X[[x_idx]], y)
                 
                 refitted_proba = cloned_estimator.predict_proba(X_reduced)
                 
