@@ -5,6 +5,7 @@ import pickle
 import zlib
 import os
 import zipfile
+import io
 from contextlib import contextmanager
 
 import dill
@@ -116,6 +117,7 @@ class MyActiveLearner:
         config_str=None,
         i=None,
         pool_subsample=None,
+        ee='offline',
 
         model="svm-linear",
         animate=False,
@@ -150,6 +152,13 @@ class MyActiveLearner:
 
         self.lb = lb
         self.ub = ub
+        
+        if ee == "online":
+            self.ee = expected_error_online
+        elif ee == "offline":
+            self.ee = expected_error
+        else:
+            raise ValueError(f"ee must be online or offline, got {ee}")
 
         if self.animate:
             if poison:
@@ -395,7 +404,7 @@ class MyActiveLearner:
 
         t_ee_start = time.monotonic()
         if "expected_error" in self.metrics.metrics:
-            extra_metrics['expected_error'] = expected_error(
+            extra_metrics['expected_error'] = self.ee(
                 self.learner, 
                 self.X_subsampled,
                 unique_labels=self.unique_labels
@@ -631,15 +640,17 @@ class CompressedStore:
         return self.i
     
     def __getitem__(self, i):
+        # Files are 1 indexed
+        i += 1
         if i < 0:
             i = self.i - i
         try:
-            return pickle.loads(self.zip.open(str(i)))
+            return pickle.Unpickler(self.zip.open(str(i))).load()
         except KeyError:
-            return IndexError(f"index {i} out of range for store of length {self.i}")
+            return IndexError(f"index {i-1} out of range for store of length {self.i}")
         
     def __iter__(self):
-        i = 0
+        i = 1
         while i < self.i:
             yield self[i]
             i += 1
@@ -792,6 +803,44 @@ def expected_error(learner, X, predict_proba=None, p_subsample=1.0, unique_label
                 y_new = data_vstack((learner.y_training, np.array(y).reshape(1,)))
 
                 cloned_estimator.fit(X_new, y_new)
+                refitted_proba = cloned_estimator.predict_proba(X_reduced)
+                
+                nloss = _proba_uncertainty(refitted_proba)
+
+                expected_error[x_idx] += np.sum(nloss)*X_proba[x_idx, y_idx]
+
+        else:
+            expected_error[x_idx] = np.inf
+
+    return expected_error
+
+
+def expected_error_online(learner, X, predict_proba=None, p_subsample=1.0, unique_labels=None):
+    loss = 'binary'
+    
+    expected_error = np.zeros(shape=(X.shape[0], ))
+    possible_labels = unique_labels if unique_labels is not None else np.unique(learner.y_training)
+
+    X_proba = predict_proba or learner.predict_proba(X)
+
+    base_estimator = sklearn.calibration.CalibratedClassifierCV(
+        sklearn.linear_model.SGDClassifier(loss='hinge', penalty='l2', learning_rate='constant'),
+        ensemble=False
+    )
+    base_estimator.fit(learner.X_training, learner.y_training)
+
+    for x_idx in range(X.shape[0]):
+        # subsample the data if needed
+        if np.random.rand() <= p_subsample:
+            if isinstance(X, csr_matrix):
+                X_reduced = delete_from_csr(X, [x_idx])
+            else:
+                X_reduced = np.delete(X, x_idx, axis=0)
+            # estimate the expected error
+            for y_idx, y in enumerate(possible_labels):
+                cloned_estimator = clone(base_estimator)
+                clonsed_estimator.partial_fit(X[[x_idx]], y)
+                
                 refitted_proba = cloned_estimator.predict_proba(X_reduced)
                 
                 nloss = _proba_uncertainty(refitted_proba)

@@ -85,6 +85,9 @@ class Configurations:
 
     def __iter__(self, *args, **kwargs):
         return self.configurations.__iter__(*args, **kwargs)
+    
+    def __getitem__(self, *args, **kwargs):
+        return self.configurations.__getitem__(*args, **kwargs)
 
     def __len__(self):
         return len(self.configurations)
@@ -343,7 +346,8 @@ def __run_inner(config, force_cache=False, force_run=False, backend="loky", abor
                         stop_function=config.meta.get("stop_function", ("default", lambda learner: False))[1],
                         config_str=config.serialize(),
                         i=i,
-                        pool_subsample=config.meta.get("pool_subsample", None)
+                        pool_subsample=config.meta.get("pool_subsample", None),
+                        ee=config.meta.get("ee", "offline")
                     ).active_learn2()
                 )(config.dataset(), config.method, i)
                 for i in range(config.meta["n_runs"])
@@ -401,41 +405,18 @@ def __read_classifiers(config, i=None):
 def __read_result(file, config):
     if config.meta.get("aggregate", True):
         with open(file, "r") as f:
-            config = Config(**{"model_name": "svm-linear", **json.loads(f.readline())})
+            cached_config = Config(**{"model_name": "svm-linear", **json.loads(f.readline())})
             result = pd.read_csv(f, index_col=0)
-        return (config, result)
+        return (cached_config, result)
     else:
         results = []
         for name in glob.glob(f"cache/{config.serialize()}_*.csv"):
             with open(name, "r") as f:
-                config = Config(**{"model_name": "svm-linear", **json.loads(f.readline())})
+                cached_config = Config(**{"model_name": "svm-linear", **json.loads(f.readline())})
                 results.append(pd.read_csv(f, index_col=0))
-        return config, results
-
-
-def __flatten_dict(d):
-    def items():
-        for key, value in d.items():
-            if isinstance(value, dict):
-                for subkey, subvalue in __flatten_dict(value).items():
-                    yield (key, subkey), subvalue
-            else:
-                yield key, value
-
-    return dict(items())
-
-
-def __plot_metrics(axes, metrics, stderr, legend):
-    for i, ax in enumerate(axes.flatten()):
-        ax.errorbar(
-            metrics["x"],
-            metrics.iloc[:, 1 + i],
-            yerr=stderr.iloc[:, 1 + i],
-            label=f"{legend}" if i == 0 else "",
-        )
-        ax.set_xlabel("Instances")
-        ax.set_ylabel(["Accuracy", "F1", "AUC ROC", "Empirical Robustness"][i])
-        plt.suptitle(dataset_name)
+        if len(results) != config.meta.get("n_runs", 10):
+            raise FileNotFoundError("did not find disaggregated runs")
+        return cached_config, results
 
 
 def __progress_hack():
@@ -455,11 +436,3 @@ def __progress_hack():
     """
         )
     )
-
-
-def __free_cpus(pesimistic=False):
-    """
-    Count the number of free CPU cores.
-    """
-    rounder = math.floor if pesimistic else math.ceil
-    return rounder((100*psutil.cpu_count()-psutil.cpu_percent(interval=1))/100)
