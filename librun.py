@@ -2,7 +2,6 @@ import os
 import math
 import pickle
 import socket
-import inspect
 from time import monotonic
 from dataclasses import dataclass
 from typing import Dict, Any, Callable
@@ -14,7 +13,10 @@ import glob
 import requests
 import pandas as pd
 import matplotlib.pyplot as plt
-from IPython.core.display import HTML, display
+try:
+    from IPython.core.display import HTML, display
+except ModuleNotFoundError:
+    pass
 from libutil import ProgressParallel
 from joblib import delayed
 from sklearn.metrics import accuracy_score, f1_score, roc_auc_score
@@ -405,18 +407,21 @@ def __read_result(file, config):
 
 def __progress_hack():
     # Annoying hack so that the progressbars disapear as they're supposed to
-    display(
-        HTML(
-            """
-    <style>
-    .p-Widget.jp-OutputPrompt.jp-OutputArea-prompt:empty {
-      padding: 0;
-      border: 0;
-    }
-    .p-Widget.jp-RenderedText.jp-OutputArea-output pre:empty {
-      display: none;
-    }
-    </style>
-    """
+    try:
+        display(
+            HTML(
+                """
+        <style>
+        .p-Widget.jp-OutputPrompt.jp-OutputArea-prompt:empty {
+        padding: 0;
+        border: 0;
+        }
+        .p-Widget.jp-RenderedText.jp-OutputArea-output pre:empty {
+        display: none;
+        }
+        </style>
+        """
+            )
         )
-    )
+    except NameError:
+        pass
