@@ -1,7 +1,7 @@
 import tarfile
 import pickle
 import glob
-from functools import partial
+from functools import partial, lru_cache
 import requests, zipfile, io
 from os.path import exists
 
@@ -1084,3 +1084,10 @@ def _cache_restore(name):
             return X, f['y']
     except FileNotFoundError:
         return None
+
+
+def wrap(func, *args, **kwargs):
+    wrapper = lambda: lru_cache()(func)(*args, **kwargs)
+    for attr in [attr for attr in dir(func) if not attr.startswith('__')]:
+        setattr(wrapper, attr, getattr(func, attr))
+    return wrapper

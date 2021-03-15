@@ -1,15 +1,11 @@
 import os
-import io
-import itertools
 import math
 import pickle
 import socket
 import inspect
 from time import monotonic
-from collections import defaultdict
 from dataclasses import dataclass
 from typing import Dict, Any, Callable
-from functools import partial
 import json
 import math
 from itertools import groupby
@@ -21,15 +17,12 @@ import matplotlib.pyplot as plt
 from IPython.core.display import HTML, display
 from libutil import ProgressParallel
 from joblib import delayed
-from modAL import batch
 from sklearn.metrics import accuracy_score, f1_score, roc_auc_score
 from sklearn import metrics as skmetrics
 from sklearn.utils import check_random_state
-from art.metrics import empirical_robustness
 from tabulate import tabulate
 
 from libactive import active_split, MyActiveLearner, CompressedStore
-from libadversarial import random_batch
 
 
 @dataclass
@@ -146,8 +139,6 @@ def run(
     except Exception as e:
         duration = monotonic()-start
         
-        top = inspect.stack()[1]
-        filename = os.path.basename(top.filename)
         requests.post(
             'https://discord.com/api/webhooks/809248326485934080/aIHL726wKxk42YpDI_GtjsqfAWuFplO3QrXoza1r55XRT9-Ao9Rt8sBtexZ-WXSPCtsv', 
             data={'content': f"Run with {len(configurations)} experiments on {socket.gethostname()} **FAILED** after {duration/60/60:.1f}h\n```{e}```"}
@@ -157,8 +148,6 @@ def run(
     duration = monotonic()-start
     
     if duration > 10*60 or fragment_id is not None:
-        top = inspect.stack()[1]
-        filename = os.path.basename(top.filename)
         requests.post(
             'https://discord.com/api/webhooks/809248326485934080/aIHL726wKxk42YpDI_GtjsqfAWuFplO3QrXoza1r55XRT9-Ao9Rt8sBtexZ-WXSPCtsv', 
             data={'content': f"Run with {len(configurations)} experiments on {socket.gethostname()} completed after {duration/60/60:.1f}h"}
@@ -387,11 +376,6 @@ def __write_result(config, result):
             f.write("\n")
             result.to_csv(f)
         
-        
-def __write_classifiers(config, classifiers):
-    file = f"cache/classifiers/{config.serialize()}.pickle"
-    with open(file, "wb") as f:
-        pickle.dump(classifiers, f)
         
 def __read_classifiers(config, i=None):
     pfile = f"cache/classifiers/{config.serialize()}.pickle"
