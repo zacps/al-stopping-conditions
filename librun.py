@@ -131,13 +131,13 @@ def run(
             backend=backend,
         )(
             delayed(__run_inner)(
-                config, force_cache=force_cache, force_run=force_run, abort=abort, metrics_measures=metrics, workers=workers
+                config, force_cache=force_cache, force_run=force_run, abort=abort, metrics_measures=metrics, workers=workers, fragment_run=fragment_run
             )
             for config in configurations
         )
         if configurations.meta['ret_classifiers']:
-            classifiers = [__read_classifiers(config, i) for i, config in enumerate(configurations)]
-            results = list(zip(results, classifiers))
+            for i, config in enumerate(configurations):
+                results[i] = (results[i], [__read_classifiers(config, j) for j in range(config.meta.get("n_runs", 10))])
     except Exception as e:
         duration = monotonic()-start
         
@@ -272,7 +272,7 @@ def table(results, tablefmt="fancy_grid"):
         )
 
 
-def __run_inner(config, force_cache=False, force_run=False, backend="loky", abort=None, metrics_measures=None, workers=None):
+def __run_inner(config, force_cache=False, force_run=False, backend="loky", abort=None, metrics_measures=None, workers=None, fragment_run=None):
     if metrics_measures is None:
         metrics_measures = [
             accuracy_score,
@@ -307,7 +307,12 @@ def __run_inner(config, force_cache=False, force_run=False, backend="loky", abor
         try:
             # Seed a random state generator. This seed is constant between methods/datasets/models so comparisons can be made with fewer runs.
             # It is however *variant* with each run.
-            random_state = check_random_state(42)
+            if fragment_run is not None:
+                random_state = check_random_state(fragment_run)
+                runs = [fragment_run]
+            else:
+                random_state = check_random_state(42)
+                runs = range(config.meta["n_runs"])
             
             metrics = ProgressParallel(
                 n_jobs=min(config.meta["n_runs"], workers),
@@ -341,7 +346,7 @@ def __run_inner(config, force_cache=False, force_run=False, backend="loky", abor
                         ee=config.meta.get("ee", "offline")
                     ).active_learn2()
                 )(config.dataset(), config.method, i)
-                for i in range(config.meta["n_runs"])
+                for i in runs
             )
             
         except Exception as e:
@@ -386,7 +391,7 @@ def __read_classifiers(config, i=None):
         with open(pfile, "rb") as f:
             return pickle.load(f)
     except FileNotFoundError:
-        return CompressedStore(zfile)
+        return CompressedStore(zfile, read=True)
 
 def __read_result(file, config):
     if config.meta.get("aggregate", True):

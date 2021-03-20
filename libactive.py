@@ -27,6 +27,7 @@ from sklearn.naive_bayes import GaussianNB
 from sklearn.neighbors import KNeighborsClassifier
 from sklearn.linear_model import Perceptron
 from sklearn.base import clone
+from sklearn import calibration
 from sklearn.svm import SVC
 from modAL.utils.data import data_vstack
 from modAL.uncertainty import _proba_uncertainty, classifier_uncertainty
@@ -367,7 +368,7 @@ class MyActiveLearner:
             self = checkpoint
             
         # Classifiers are stored as a local and explicitly restored as they need to be compressed before being stored.
-        with store(f"cache/classifiers/{self.config_str}_{self.i}.zip", enable=self.ret_classifiers) as classifiers:
+        with store(f"cache/classifiers/{self.config_str}_{self.i}.zip", enable=self.ret_classifiers, restore=checkpoint is not None) as classifiers:
             if self.ret_classifiers and len(classifiers) == 0:
                 classifiers.append(deepcopy(self.learner))
 
@@ -383,6 +384,7 @@ class MyActiveLearner:
         # Write the experiment run results and cleanup intermediate checkpoints
         self._write_run(self.metrics)
         self._cleanup_checkpoint()
+        
         return self.metrics
     
     
@@ -399,12 +401,19 @@ class MyActiveLearner:
         # PRE METRICS  -----------------------------------------------------------------------------------------------------------------------------------
 
         t_ee_start = time.monotonic()
-        if "expected_error" in self.metrics.metrics:
-            extra_metrics['expected_error'] = self.ee(
+        if any("expected_error" in metric_name if isinstance(metric_name, str) else False for metric_name in self.metrics.metrics):
+            result = self.ee(
                 self.learner, 
                 self.X_subsampled,
                 unique_labels=self.unique_labels
             )
+            #raise Exception(f"result {result}")
+            extra_metrics['expected_error_min'] = np.min(result)
+            extra_metrics['expected_error_max'] = np.max(result)
+            extra_metrics['expected_error_average'] = np.mean(result)
+            extra_metrics['expected_error_variance'] = np.var(result)
+        else:
+            raise Exception("WHAT?")
         extra_metrics['time_ee'] = time.monotonic() - t_ee_start
             
         if "contradictory_information" in self.metrics.metrics:
@@ -455,109 +464,6 @@ class MyActiveLearner:
 
         self._checkpoint(self)
         
-
-    def active_learn_query_synthesis(
-        self,
-        X_labelled,
-        Y_labelled,
-        y_oracle: Callable,
-        X_test,
-        Y_test,
-        query_strategy,
-        should_stop: Callable,
-        model="svm-linear",
-        teach_advesarial=False,
-        track_flips=False,
-    ) -> Tuple[list, list]:
-        """
-        Perform active learning on the given dataset using a linear SVM model, querying data with the given query strategy.
-
-        Returns metrics.
-        """
-
-        total_labels = 0
-        oracle_matched_poison = 0
-
-        learner = self.__setup_learner(
-            X_labelled, Y_labelled, query_strategy, model="svm-linear"
-        )
-
-        self.metrics.collect(len(X_labelled), learner.estimator, Y_test, X_test)
-
-        if self.animate and not self.poison:
-            self.__animation_frame(learner)
-        elif self.animate and self.poison:
-            self.__animation_frame(learner, ax=self.ax[0])
-            self.__animation_frame_poison_c(
-                learner,
-                None,
-                lb=self.lb,
-                ub=self.ub,
-                attack_points=None,
-                start_points=None,
-                ax=self.ax[1],
-            )
-
-        while not should_stop(learner, self.metrics.frame.iloc[-1]):
-            try:
-                t_start = time.monotonic()
-                (
-                    _,
-                    query_points,
-                    start_points,
-                    attack,
-                    x_seq,
-                    query_points_labels,
-                ) = learner.query(None, learner.X_training, learner.y_training)
-                t_elapsed = time.monotonic() - t_start
-            except np.linalg.LinAlgError:
-                print("WARN: Break due to convergence failure")
-                break
-
-            labels = y_oracle(query_points)
-            total_labels += len(labels)
-            oracle_matched_poison += np.count_nonzero(labels == query_points_labels)
-
-            learner.teach(query_points, labels)
-
-            self.metrics.collect(
-                self.metrics.frame.x.iloc[-1] + len(query_points),
-                learner.estimator,
-                Y_test,
-                X_test,
-                t_elapsed=t_elapsed,
-            )
-
-            if self.animate and not self.poison:
-                self.__animation_frame(
-                    learner,
-                    new=query_points,
-                    new_labels=labels,
-                    start_points=start_points,
-                )
-            elif self.animate and self.poison:
-                self.__animation_frame_poison(
-                    learner, X_test, Y_test, query_points, start_points, ax=self.ax[0]
-                )
-                self.__animation_frame_poison_c(
-                    learner,
-                    attack,
-                    lb=self.lb,
-                    ub=self.ub,
-                    attack_points=query_points,
-                    start_points=start_points,
-                    x_seq=x_seq,
-                    ax=self.ax[1],
-                )
-                self.cam.snap()
-
-        if track_flips:
-            print(
-                f"{oracle_matched_poison} of {total_labels} had equal oracle and poison attack labels"
-            )
-
-        return self.metrics
-
     
     def _checkpoint(self, data):
         file = f"cache/checkpoints/{self.config_str}_{self.i}.pickle"
@@ -598,9 +504,9 @@ class MyActiveLearner:
     
     
 @contextmanager
-def store(filename, enable):
+def store(filename, enable, restore=False):
     if enable:
-        inner = CompressedStore(filename)
+        inner = CompressedStore(filename, restore=restore)
         try:
             yield inner
         finally:
@@ -617,34 +523,51 @@ class CompressedStore:
     During writing use the context manager `store` to ensure all changes are reflected.
     """
     
-    def __init__(self, filename):
-        self.zip = zipfile.ZipFile(filename, 'a', compression=zipfile.ZIP_DEFLATED)
+    def __init__(self, filename, restore = False, read = False):
+        if read:
+            mode = 'r'
+        elif restore:
+            mode = 'a'
+        else:
+            mode = 'w'
+        self.zip = zipfile.ZipFile(filename, mode, compression=zipfile.ZIP_DEFLATED)
         self.i = len(self.zip.namelist())
         
     def append(self, obj):
-        self.i+=1
         self.zip.writestr(str(self.i), pickle.dumps(obj))
+        assert len(self.zip.namelist()) == self.i + 1
+        self.i+=1
         
     def __len__(self):
         return self.i
     
     def __getitem__(self, i):
-        # Files are 1 indexed
-        i += 1
+        if isinstance(i, slice):
+            if i.start < 0:
+                i.start = self.i - i.start
+            if i.stop is not None and i.stop < 0:
+                i.stop = self.i - i.stop
+            try:
+                return [pickle.Unpickler(self.zip.open(str(x))).load() for x in range(i.start, i.stop or self.i, i.step or 1)]
+            except KeyError:
+                raise IndexError(f"index {i} out of range for store of length {self.i}")
+            
         if i < 0:
             i = self.i - i
         try:
             return pickle.Unpickler(self.zip.open(str(i))).load()
         except KeyError:
-            return IndexError(f"index {i-1} out of range for store of length {self.i}")
+            raise IndexError(f"index {i} out of range for store of length {self.i}")
         
+    # As written this is a single use iterable, create a closure here which keeps an ephemeral counter.
     def __iter__(self):
-        i = 1
+        i = 0
         while i < self.i:
             yield self[i]
             i += 1
         
     def close(self):
+        #raise Exception("closed store!")
         self.zip.close()
     
     
@@ -812,11 +735,9 @@ def expected_error_online(learner, X, predict_proba=None, p_subsample=1.0, uniqu
 
     X_proba = predict_proba or learner.predict_proba(X)
 
-    base_estimator = sklearn.calibration.CalibratedClassifierCV(
-        sklearn.linear_model.SGDClassifier(loss='hinge', penalty='l2', learning_rate='constant'),
-        ensemble=False
-    )
-    base_estimator.fit(learner.X_training, learner.y_training)
+    base_estimator = sklearn.linear_model.SGDClassifier(loss='hinge', penalty='l2', eta0=0.1, learning_rate='constant')
+    # TODO: Multiple epochs?
+    base_estimator.partial_fit(learner.X_training, learner.y_training, classes=possible_labels)
 
     for x_idx in range(X.shape[0]):
         # subsample the data if needed
@@ -827,16 +748,28 @@ def expected_error_online(learner, X, predict_proba=None, p_subsample=1.0, uniqu
                 X_reduced = np.delete(X, x_idx, axis=0)
             # estimate the expected error
             for y_idx, y in enumerate(possible_labels):
-                cloned_estimator = clone(base_estimator)
-                cloned_estimator.partial_fit(X[[x_idx]], y)
+                #raise Exception(y)
+                cloned_estimator = deepcopy(base_estimator)
+                cloned_estimator.partial_fit(X[[x_idx]], [y])
                 
-                refitted_proba = cloned_estimator.predict_proba(X_reduced)
+                #calibrated_estimator = calibration.CalibratedClassifierCV(
+                #    # is eta=0.1 right?
+                #    # https://stackoverflow.com/questions/23056460/does-the-svm-in-sklearn-support-incremental-online-learning
+                #    base_estimator=cloned_estimator,
+                #    ensemble=False,
+                #    cv='prefit'
+                #)
                 
-                nloss = _proba_uncertainty(refitted_proba)
+                refitted_proba = cloned_estimator.decision_function(X_reduced)
+                
+                nloss = refitted_proba #_proba_uncertainty(refitted_proba)
+                
+                #assert (nloss>=0).all() and (nloss<=1).all()
 
-                expected_error[x_idx] += np.sum(nloss)*X_proba[x_idx, y_idx]
+                expected_error[x_idx] += np.sum(np.abs(nloss))*X_proba[x_idx, y_idx]
 
         else:
             expected_error[x_idx] = np.inf
 
+    assert (expected_error<10000).all() and (expected_error>=0).all()
     return expected_error

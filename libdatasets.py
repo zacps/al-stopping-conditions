@@ -133,7 +133,7 @@ def bias_abalone(data, labels):
 
 
 @source("https://archive.ics.uci.edu/ml/datasets/car+evaluation")
-def car(dataset_size=100):
+def car(dataset_size=1000):
     cache = _cache_restore("car")
     if cache is not None:
         X, y = _split(cache[0], cache[1], dataset_size)
@@ -280,7 +280,7 @@ def bias_skin(data, labels):
 def german(dataset_size=1000):
     cache = _cache_restore("german")
     if cache is not None:
-        X, y = _split(cache[0], cache[1], dataset_size)
+        X, y = _split(cache[0], cache[1], dataset_size if dataset_size < 1000 else None)
         return X, y
     
     url = "https://archive.ics.uci.edu/ml/machine-learning-databases/statlog/german/german.data-numeric"
@@ -288,7 +288,7 @@ def german(dataset_size=1000):
     y = dataset[24].to_numpy()
     X = dataset.drop([24], axis=1).to_numpy()
     _cache_save("german", X, y)
-    X, y = _split(X, y, dataset_size)
+    X, y = _split(X, y, dataset_size if dataset_size < 1000 else None)
     return X, y
 
 
