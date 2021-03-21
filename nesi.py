@@ -108,18 +108,19 @@ capture_metrics = [
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument('fragment-id', type=int)
-    parser.add_argument('fragment-length', type=int)
+    parser.add_argument('fragment_id', type=int)
+    parser.add_argument('fragment_length', type=int)
+    parser.add_argument('fragment_run', type=int)
 
     args = parser.parse_args()
 
     librun.run(
         matrix, 
         metrics=capture_metrics,
-        abort=False,
+        #abort=False,
         fragment_id=args.fragment_id,
         fragment_length=args.fragment_length,
-        fragment_run=None # Not yet implemented
+        fragment_run=args.fragment_run
     )
 
 

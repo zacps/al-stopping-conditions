@@ -16,6 +16,8 @@ from sklearn.datasets import fetch_openml
 from tabulate import tabulate
 from bs4 import BeautifulSoup
 
+from libutil import dataset_dir
+
 def dataset_summary(names, datasets):
     data = [dataset() for dataset in datasets]
     class_prop=[np.unique(y, return_counts=True) for _, y in data]
@@ -1070,13 +1072,13 @@ def bias_dataset(X_train, X_test, y_train, y_test, rand=None, **kwargs):
 
 def _cache_save(name, X, y):
     if type(X) is scipy.sparse.csr_matrix:
-        np.savez_compressed(f"datasets/cache/{name}.npz", data=X.data, indices=X.indices, indptr=X.indptr, y=y)
+        np.savez_compressed(f"{dataset_dir()}/{name}.npz", data=X.data, indices=X.indices, indptr=X.indptr, y=y)
     else:
-        np.savez_compressed(f"datasets/cache/{name}.npz", X=X, y=y)
+        np.savez_compressed(f"{dataset_dir()}/{name}.npz", X=X, y=y)
 
 def _cache_restore(name):
     try:
-        with np.load(f"datasets/cache/{name}.npz", allow_pickle=True) as f:
+        with np.load(f"{dataset_dir()}/{name}.npz", allow_pickle=True) as f:
             if 'data' in f:
                 X = scipy.sparse.csr_matrix((f['data'], f['indices'], f['indptr']))
             else:

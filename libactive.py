@@ -34,7 +34,7 @@ from modAL.uncertainty import _proba_uncertainty, classifier_uncertainty
 import scipy
 
 from libplot import plot_classification, plot_poison, c_plot_poison
-from libutil import Metrics
+from libutil import Metrics, out_dir
 
 # Use GPU-based thundersvm when available
 try:
@@ -368,16 +368,19 @@ class MyActiveLearner:
             self = checkpoint
             
         # Classifiers are stored as a local and explicitly restored as they need to be compressed before being stored.
-        with store(f"cache/classifiers/{self.config_str}_{self.i}.zip", enable=self.ret_classifiers, restore=checkpoint is not None) as classifiers:
+        with store(f"{out_dir()}/classifiers/{self.config_str}_{self.i}.zip", enable=self.ret_classifiers, restore=checkpoint is not None) as classifiers:
             if self.ret_classifiers and len(classifiers) == 0:
                 classifiers.append(deepcopy(self.learner))
 
-            while self.X_unlabelled.shape[0] != 0 and not self.stop_function(self.learner):
+            # Initial subsampling, this should probably be done somewhere else tbh...
+            if checkpoint is None:
                 if self.pool_subsample is not None:
                     # TODO: Should this random be seeded?
                     self.X_subsampled = self.X_unlabelled[np.random.choice(self.X_unlabelled.shape[0], self.pool_subsample, replace=False)] 
                 else:
                     self.X_subsampled = self.X_unlabelled
+
+            while self.X_unlabelled.shape[0] != 0 and not self.stop_function(self.learner):
                 
                 self.active_learn_iter(classifiers)
                 
@@ -442,9 +445,11 @@ class MyActiveLearner:
 
         self.Y_oracle = np.delete(self.Y_oracle, query_idx, axis=0)
         
+        # Resubsample the unlabelled pool. This must happen after we retrain but before metrics are calculated
+        # as the subsampled unlabelled pool must be disjoint from the trained instances.
         if self.pool_subsample is not None:
             # TODO: Should this random be seeded?
-            self.X_subsampled = self.X_unlabelled[np.random.choice(self.X_unlabelled.shape[0], self.pool_subsample, replace=False)] 
+            self.X_subsampled = self.X_unlabelled[np.random.choice(self.X_unlabelled.shape[0], min(self.pool_subsample, self.X_unlabelled.shape[0]), replace=False)] 
         else:
             self.X_subsampled = self.X_unlabelled
 
@@ -466,13 +471,13 @@ class MyActiveLearner:
         
     
     def _checkpoint(self, data):
-        file = f"cache/checkpoints/{self.config_str}_{self.i}.pickle"
+        file = f"{out_dir()}/checkpoints/{self.config_str}_{self.i}.pickle"
         with open(file, "wb") as f:
             dill.dump(data, f)
 
 
     def _restore_checkpoint(self):
-        file = f"cache/checkpoints/{self.config_str}_{self.i}.pickle"
+        file = f"{out_dir()}/checkpoints/{self.config_str}_{self.i}.pickle"
         try:
             with open(file, "rb") as f:
                 return dill.load(f)
@@ -481,7 +486,7 @@ class MyActiveLearner:
 
 
     def _cleanup_checkpoint(self):
-        file = f"cache/checkpoints/{self.config_str}_{self.i}.pickle"
+        file = f"{out_dir()}/checkpoints/{self.config_str}_{self.i}.pickle"
         try:
             os.remove(file)
         except FileNotFoundError:
@@ -489,13 +494,13 @@ class MyActiveLearner:
 
 
     def _write_run(self, data):
-        file = f"cache/runs/{self.config_str}_{self.i}.csv"
+        file = f"{out_dir()}/runs/{self.config_str}_{self.i}.csv"
         with open(file, "wb") as f:
             pickle.dump(data, f)
 
 
     def _restore_run(self):
-        file = f"cache/runs/{self.config_str}_{self.i}.csv"
+        file = f"{out_dir()}/runs/{self.config_str}_{self.i}.csv"
         try:
             with open(file, "rb") as f:
                 return pickle.load(f)

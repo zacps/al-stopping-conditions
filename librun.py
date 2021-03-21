@@ -17,7 +17,7 @@ try:
     from IPython.core.display import HTML, display
 except ModuleNotFoundError:
     pass
-from libutil import ProgressParallel
+from libutil import ProgressParallel, out_dir
 from joblib import delayed
 from sklearn.metrics import accuracy_score, f1_score, roc_auc_score
 from sklearn import metrics as skmetrics
@@ -108,7 +108,7 @@ def run(
     
     # For NeSI
     if fragment_id is not None:
-        configurations = configurations[fragment_id:fragment_id+fragment_length]
+        configurations.configurations = configurations.configurations[fragment_id:fragment_id+fragment_length]
         
     # Monomorphise parametric meta parameters
     for config in configurations:
@@ -124,7 +124,7 @@ def run(
 
     try:
         results = ProgressParallel(
-            n_jobs=math.ceil(workers / configurations.meta["n_runs"]),
+            n_jobs=math.ceil(workers / configurations.meta["n_runs"] if fragment_run is None else 1),
             total=len(configurations),
             desc=f"Experiment",
             leave=False,
@@ -284,10 +284,10 @@ def __run_inner(config, force_cache=False, force_run=False, backend="loky", abor
     
     try:
         try:
-            cached_config, metrics = __read_result(f"cache/{config.serialize()}.csv", config)
+            cached_config, metrics = __read_result(f"{out_dir()}/{config.serialize()}.csv", config)
         except FileNotFoundError as e:
             if config.model_name == None or config.model_name == "svm-linear":
-                cached_config, metrics = __read_result(f"cache/{config.serialize_no_model()}.csv", config)
+                cached_config, metrics = __read_result(f"{out_dir()}/{config.serialize_no_model()}.csv", config)
                 cached_config.model_name = "svm-linear"
             else:
                 raise e
@@ -297,7 +297,7 @@ def __run_inner(config, force_cache=False, force_run=False, backend="loky", abor
 
     except (FileNotFoundError, EOFError, pd.errors.EmptyDataError):
         if force_cache:
-            raise Exception(f"Cache file 'cache/{config.serialize()}.csv' not found")
+            raise Exception(f"Cache file '{out_dir()}/{config.serialize()}.csv' not found")
             
         if workers is None:
             workers = os.cpu_count()
@@ -360,7 +360,7 @@ def __run_inner(config, force_cache=False, force_run=False, backend="loky", abor
         __write_result(config, metrics)
         for i in range(config.meta['n_runs']):
             try:
-                os.remove(f"cache/runs/{config.serialize()}_{i}.csv")
+                os.remove(f"{out_dir()}/runs/{config.serialize()}_{i}.csv")
             except FileNotFoundError:
                 pass
 
@@ -371,13 +371,13 @@ def __run_inner(config, force_cache=False, force_run=False, backend="loky", abor
 def __write_result(config, result):
     if isinstance(result, list):
         for i in range(len(result)):
-            file = f"cache/{config.serialize()}_{i}.csv"
+            file = f"{out_dir()}/{config.serialize()}_{i}.csv"
             with open(file, "w") as f:
                 json.dump(config.json(), f)
                 f.write("\n")
                 result[i].frame.to_csv(f)
     else:
-        file = f"cache/{config.serialize()}.csv"
+        file = f"{out_dir()}/{config.serialize()}.csv"
         with open(file, "w") as f:
             json.dump(config.json(), f)
             f.write("\n")
@@ -385,8 +385,8 @@ def __write_result(config, result):
         
         
 def __read_classifiers(config, i=None):
-    pfile = f"cache/classifiers/{config.serialize()}.pickle"
-    zfile = f"cache/classifiers/{config.serialize()}_{i}.zip"
+    pfile = f"{out_dir()}/classifiers/{config.serialize()}.pickle"
+    zfile = f"{out_dir()}/classifiers/{config.serialize()}_{i}.zip"
     try:
         with open(pfile, "rb") as f:
             return pickle.load(f)
@@ -401,7 +401,7 @@ def __read_result(file, config):
         return (cached_config, result)
     else:
         results = []
-        for name in glob.glob(f"cache/{config.serialize()}_*.csv"):
+        for name in glob.glob(f"{out_dir()}/{config.serialize()}_*.csv"):
             with open(name, "r") as f:
                 cached_config = Config(**{"model_name": "svm-linear", **json.loads(f.readline())})
                 results.append(pd.read_csv(f, index_col=0))

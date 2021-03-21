@@ -1,3 +1,5 @@
+import os
+
 import pandas as pd
 import numpy as np
 from joblib import Parallel
@@ -18,19 +20,23 @@ class ProgressParallel(Parallel):
         super().__init__(*args, **kwargs)
 
     def __call__(self, *args, **kwargs):
-        with tqdm(
-            disable=not self._use_tqdm,
-            total=self._total,
-            leave=self.leave,
-            desc=self.desc,
-        ) as self._pbar:
+        if run_from_ipython():
+            with tqdm(
+                disable=not self._use_tqdm,
+                total=self._total,
+                leave=self.leave,
+                desc=self.desc,
+            ) as self._pbar:
+                return Parallel.__call__(self, *args, **kwargs)
+        else:
             return Parallel.__call__(self, *args, **kwargs)
 
     def print_progress(self):
-        if self._total is None:
-            self._pbar.total = self.n_dispatched_tasks
-        self._pbar.n = self.n_completed_tasks
-        self._pbar.refresh()
+        if run_from_ipython():
+            if self._total is None:
+                self._pbar.total = self.n_dispatched_tasks
+            self._pbar.n = self.n_completed_tasks
+            self._pbar.refresh()
 
 
 class Metrics:
@@ -104,3 +110,17 @@ class Metrics:
         sem.columns = [str(col) + "_stderr" for col in sem.columns]
         return pd.concat([averaged, sem], axis=1)
     
+
+def run_from_ipython():
+    try:
+        __IPYTHON__
+        return True
+    except NameError:
+        return False
+
+
+def out_dir():
+    return os.environ['OUT_DIR']
+
+def dataset_dir():
+    return os.environ['DATASET_DIR']
