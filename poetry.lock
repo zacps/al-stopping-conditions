@@ -1,6 +1,6 @@
 [[package]]
 name = "adversarial-robustness-toolbox"
-version = "1.5.1"
+version = "1.6.0"
 description = "Toolbox for adversarial machine learning."
 category = "main"
 optional = false
@@ -11,7 +11,8 @@ cma = "*"
 ffmpeg-python = "*"
 matplotlib = "*"
 mypy = "*"
-numpy = "*"
+numba = ">=0.52.0,<0.53.0"
+numpy = ">=1.18.0"
 Pillow = "*"
 pydub = "*"
 resampy = "*"
@@ -710,8 +711,8 @@ content-hash = "504c849bd402426f67914c816a54cdde75415ecc9bec2fd5e61d52b6fb91b43f
 
 [metadata.files]
 adversarial-robustness-toolbox = [
-    {file = "adversarial-robustness-toolbox-1.5.1.tar.gz", hash = "sha256:dc055025ba5b4236962d4563683e97d1593e66aa1bcc94bcb0bb23612aae64f6"},
-    {file = "adversarial_robustness_toolbox-1.5.1-py3-none-any.whl", hash = "sha256:9935097065500b5762039a87f74da2c5bd9e5982298e3517bc69e33c4852bb08"},
+    {file = "adversarial-robustness-toolbox-1.6.0.tar.gz", hash = "sha256:6530b216cfd047052ea9823250c92a9b1b5b6379e9fd7ca849c85130188a10dd"},
+    {file = "adversarial_robustness_toolbox-1.6.0-py3-none-any.whl", hash = "sha256:82233687670b3b9a8721858ebd48dcece5b2826973dfda3654e35c96b6888b6a"},
 ]
 appdirs = [
     {file = "appdirs-1.4.4-py2.py3-none-any.whl", hash = "sha256:a841dacd6b99318a741b166adb07e19ee71a274450e68237b4650ca1055ab128"},

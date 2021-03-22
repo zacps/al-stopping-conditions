@@ -9,6 +9,7 @@ import json
 import math
 from itertools import groupby
 import glob
+from pprint import pprint, pformat
 
 import requests
 import pandas as pd
@@ -54,6 +55,9 @@ class Config:
             "model_name": self.model_name,
             "meta": {k: v if k != "stop_function" else v[0] for k, v in self.meta.items()},
         }
+    
+    def __repr__(self):
+        return pformat(self.json())
 
 
 class Configurations:
@@ -77,6 +81,9 @@ class Configurations:
                                 meta=matrix["meta"],
                             )
                         )
+                        
+    def __repr__(self):
+        return pformat({"meta": self.meta.__repr__(), "configurations": self.configurations.__repr__()})
 
     def __iter__(self, *args, **kwargs):
         return self.configurations.__iter__(*args, **kwargs)
@@ -99,7 +106,8 @@ def run(
     metrics=None,
     fragment_id=None,
     fragment_length=1,
-    fragment_run=None
+    fragment_run=None,
+    dry_run=False
 ):
     if fragment_id is None:
         __progress_hack()
@@ -115,6 +123,13 @@ def run(
         for k, v in config.meta.items():
             if isinstance(v, dict):
                 config.meta[k] = v.get(config.dataset_name, v["*"])
+                
+    # Exit if this is a dry run
+    if dry_run:
+        print("Exiting due to dry run:")
+        pprint(configurations)
+        print(f"Runs: {fragment_run}")
+        return
 
     # Detect number of available CPUs
     if workers is None:

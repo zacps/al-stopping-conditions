@@ -111,6 +111,7 @@ def main():
     parser.add_argument('fragment_id', type=int)
     parser.add_argument('fragment_length', type=int)
     parser.add_argument('fragment_run', type=int)
+    parser.add_argument('--dry-run', action='store_true')
 
     args = parser.parse_args()
 
@@ -120,7 +121,8 @@ def main():
         #abort=False,
         fragment_id=args.fragment_id,
         fragment_length=args.fragment_length,
-        fragment_run=args.fragment_run
+        fragment_run=args.fragment_run,
+        dry_run=args.dry_run
     )
 
 
