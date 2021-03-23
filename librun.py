@@ -106,7 +106,8 @@ def run(
     metrics=None,
     fragment_id=None,
     fragment_length=1,
-    fragment_run=None,
+    fragment_run_start=None,
+    fragment_run_end=None,
     dry_run=False
 ):
     if fragment_id is None:
@@ -128,7 +129,7 @@ def run(
     if dry_run:
         print("Exiting due to dry run:")
         pprint(configurations)
-        print(f"Runs: {fragment_run}")
+        print(f"Runs: {fragment_run_start}-{fragment_run_end}")
         return
 
     # Detect number of available CPUs
@@ -137,22 +138,27 @@ def run(
         if "sched_getaffinity" in dir(os):
             workers = len(os.sched_getaffinity(0))
 
+    if fragment_run_start is not None:
+        n_runs = (fragment_run_end-fragment_run_start) if fragment_run_end is not None else 1
+    else:
+        n_runs = configurations.meta['n_runs']
+
     try:
         results = ProgressParallel(
-            n_jobs=math.ceil(workers / configurations.meta["n_runs"] if fragment_run is None else 1),
+            n_jobs=math.ceil(workers / n_runs),
             total=len(configurations),
             desc=f"Experiment",
             leave=False,
             backend=backend,
         )(
             delayed(__run_inner)(
-                config, force_cache=force_cache, force_run=force_run, abort=abort, metrics_measures=metrics, workers=workers, fragment_run=fragment_run
+                config, force_cache=force_cache, force_run=force_run, abort=abort, metrics_measures=metrics, workers=workers, fragment_run_start=fragment_run_start, fragment_run_end=fragment_run_end
             )
             for config in configurations
         )
         if configurations.meta['ret_classifiers']:
             for i, config in enumerate(configurations):
-                results[i] = (results[i], [__read_classifiers(config, j) for j in range(config.meta.get("n_runs", 10))])
+                results[i] = (results[i], [__read_classifiers(config, j) for j in range(n_runs)])
     except Exception as e:
         duration = monotonic()-start
         
@@ -287,7 +293,7 @@ def table(results, tablefmt="fancy_grid"):
         )
 
 
-def __run_inner(config, force_cache=False, force_run=False, backend="loky", abort=None, metrics_measures=None, workers=None, fragment_run=None):
+def __run_inner(config, force_cache=False, force_run=False, backend="loky", abort=None, metrics_measures=None, workers=None, fragment_run_start=None, fragment_run_end=None):
     if metrics_measures is None:
         metrics_measures = [
             accuracy_score,
@@ -322,12 +328,14 @@ def __run_inner(config, force_cache=False, force_run=False, backend="loky", abor
         try:
             # Seed a random state generator. This seed is constant between methods/datasets/models so comparisons can be made with fewer runs.
             # It is however *variant* with each run.
-            if fragment_run is not None:
-                random_state = check_random_state(fragment_run)
-                runs = [fragment_run]
+            if fragment_run_start is not None:
+                if fragment_run_end is not None:
+                    runs = list(range(fragment_run_start, fragment_run_end+1))
+                else:
+                    runs = [fragment_run_start]
             else:
-                random_state = check_random_state(42)
                 runs = range(config.meta["n_runs"])
+            random_state = [check_random_state(i) for i in runs]
             
             metrics = ProgressParallel(
                 n_jobs=min(config.meta["n_runs"], workers),
@@ -337,7 +345,7 @@ def __run_inner(config, force_cache=False, force_run=False, backend="loky", abor
                 backend=backend,
             )(
                 delayed(
-                    lambda dataset, method, i: MyActiveLearner(
+                    lambda dataset, method, i, random_state: MyActiveLearner(
                         # It's important that the split is re-randomised per run.
                         *active_split(
                             *dataset, 
@@ -360,8 +368,8 @@ def __run_inner(config, force_cache=False, force_run=False, backend="loky", abor
                         pool_subsample=config.meta.get("pool_subsample", None),
                         ee=config.meta.get("ee", "offline")
                     ).active_learn2()
-                )(config.dataset(), config.method, i)
-                for i in runs
+                )(config.dataset(), config.method, i, random_state[idx])
+                for idx, i in enumerate(runs)
             )
             
         except Exception as e:

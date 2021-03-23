@@ -6,6 +6,7 @@ Takes the following CLI arguments:
 """
 
 import argparse
+from dotenv import load_dotenv
 
 from sklearn.metrics import accuracy_score, f1_score, roc_auc_score
 
@@ -110,10 +111,17 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('fragment_id', type=int)
     parser.add_argument('fragment_length', type=int)
-    parser.add_argument('fragment_run', type=int)
+    parser.add_argument('fragment_run')
     parser.add_argument('--dry-run', action='store_true')
 
     args = parser.parse_args()
+
+    fragment_run = args.fragment_run.split('-')
+    start = int(fragment_run[0])
+    if len(fragment_run) == 2:
+        end = int(fragment_run[1])
+    else:
+        end = None
 
     librun.run(
         matrix, 
@@ -121,10 +129,12 @@ def main():
         #abort=False,
         fragment_id=args.fragment_id,
         fragment_length=args.fragment_length,
-        fragment_run=args.fragment_run,
+        fragment_run_start=start,
+        fragment_run_end=end,
         dry_run=args.dry_run
     )
 
 
 if __name__ == "__main__":
+    load_dotenv()
     main()

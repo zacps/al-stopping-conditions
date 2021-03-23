@@ -25,6 +25,8 @@ statsmodels = "^0.12.2"
 psutil = "^5.8.0"
 dill = "^0.3.3"
 beautifulsoup4 = "^4.9.3"
+simple-slurm = "^0.1.6"
+python-dotenv = "^0.15.0"
 
 [tool.poetry.dev-dependencies]
 pylint = "^2.6.0"
