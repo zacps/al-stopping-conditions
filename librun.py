@@ -162,19 +162,25 @@ def run(
     except Exception as e:
         duration = monotonic()-start
         
-        requests.post(
-            'https://discord.com/api/webhooks/809248326485934080/aIHL726wKxk42YpDI_GtjsqfAWuFplO3QrXoza1r55XRT9-Ao9Rt8sBtexZ-WXSPCtsv', 
-            data={'content': f"Run with {len(configurations)} experiments on {socket.gethostname()} **FAILED** after {duration/60/60:.1f}h\n```{e}```"}
-        )
+        try:
+            requests.post(
+                'https://discord.com/api/webhooks/809248326485934080/aIHL726wKxk42YpDI_GtjsqfAWuFplO3QrXoza1r55XRT9-Ao9Rt8sBtexZ-WXSPCtsv', 
+                data={'content': f"Run with {len(configurations)} experiments on {socket.gethostname()} **FAILED** after {duration/60/60:.1f}h\n```{e}```"}
+            )
+        except ConnectionError as con_err:
+            print(f"Couldn't send failed notification because: {con_err}")
         raise e
     
     duration = monotonic()-start
     
     if duration > 10*60 or fragment_id is not None:
-        requests.post(
-            'https://discord.com/api/webhooks/809248326485934080/aIHL726wKxk42YpDI_GtjsqfAWuFplO3QrXoza1r55XRT9-Ao9Rt8sBtexZ-WXSPCtsv', 
-            data={'content': f"Run with {len(configurations)} experiments on {socket.gethostname()} completed after {duration/60/60:.1f}h"}
-        )
+        try:
+            requests.post(
+                'https://discord.com/api/webhooks/809248326485934080/aIHL726wKxk42YpDI_GtjsqfAWuFplO3QrXoza1r55XRT9-Ao9Rt8sBtexZ-WXSPCtsv', 
+                data={'content': f"Run with {len(configurations)} experiments on {socket.gethostname()} completed after {duration/60/60:.1f}h"}
+            )
+        except ConnectionError as con_err:
+            print(f"Couldn't send failed notification because: {con_err}")
 
     return results
 
