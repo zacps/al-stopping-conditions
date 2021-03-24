@@ -68,9 +68,16 @@ def active_split(X, Y, test_size=0.5, labeled_size=0.1, shuffle=True, ensure_y=F
             if klass not in Y_labelled:
                 idx = np.where(Y_oracle==klass)[0][0]
                 Y_labelled = np.concatenate((Y_labelled, [Y_oracle[idx]]), axis=0)
-                X_labelled = np.concatenate((X_labelled, [X_unlabelled[idx]]), axis=0)
+
+                if isinstance(X_unlabelled, scipy.sparse.csr_matrix):
+                    X_labelled = csr_vappend(X_labelled, X_unlabelled[idx])
+                else:
+                    X_labelled = np.concatenate((X_labelled, [X_unlabelled[idx]]), axis=0)
                 Y_oracle = np.delete(Y_oracle, idx, axis=0)
-                X_unlabelled = np.delete(X_unlabelled, idx, axis=0)
+                if isinstance(X_unlabelled, scipy.sparse.csr_matrix):
+                    X_unlabelled = delete_from_csr(X_unlabelled, row_indices=[idx])
+                else:
+                    X_unlabelled = np.delete(X_unlabelled, idx, axis=0)
 
     return X_labelled, X_unlabelled, Y_labelled, Y_oracle, X_test, Y_test
 
@@ -778,3 +785,15 @@ def expected_error_online(learner, X, predict_proba=None, p_subsample=1.0, uniqu
 
     assert (expected_error<10000).all() and (expected_error>=0).all()
     return expected_error
+
+
+def csr_vappend(a,b):
+    """ Takes in 2 csr_matrices and appends the second one to the bottom of the first one. 
+    Much faster than scipy.sparse.vstack but assumes the type to be csr and overwrites
+    the first matrix instead of copying it. The data, indices, and indptr still get copied."""
+
+    a.data = np.hstack((a.data,b.data))
+    a.indices = np.hstack((a.indices,b.indices))
+    a.indptr = np.hstack((a.indptr,(b.indptr + a.nnz)[1:]))
+    a._shape = (a.shape[0]+b.shape[0],b.shape[1])
+    return a
