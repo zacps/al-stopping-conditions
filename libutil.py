@@ -110,6 +110,14 @@ class Metrics:
         sem.columns = [str(col) + "_stderr" for col in sem.columns]
         return pd.concat([averaged, sem], axis=1)
     
+    
+def average(frame, others):
+    merged = pd.concat([frame] + [other for other in others])
+    averaged = merged.groupby(merged.index).mean()
+    sem = merged.groupby(merged.index).sem()
+    sem.columns = [str(col) + "_stderr" for col in sem.columns]
+    return pd.concat([averaged, sem], axis=1)
+    
 
 def run_from_ipython():
     try:

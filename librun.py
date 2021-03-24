@@ -25,6 +25,7 @@ from sklearn import metrics as skmetrics
 from sklearn.utils import check_random_state
 from tabulate import tabulate
 
+from libutil import Metrics, average
 from libactive import active_split, MyActiveLearner, CompressedStore
 
 
@@ -206,7 +207,10 @@ def plot(results, plot_robustness=False, key=None, series=None, title=None, ret=
 
         for config, result in group:
             if isinstance(result, list):
-                result = result[0].average2(result[1:])
+                if isinstance(result[0], Metrics):
+                    result = result[0].average2(result[1:])
+                else:
+                    result = average(result[0], result[1:])
             for i, ax in enumerate(axes.flatten()[:-extra if extra != 0 else len(axes.flatten())]):
                 try:
                     i_stderr = result.columns.get_loc("accuracy_score_stderr")
@@ -308,13 +312,22 @@ def __run_inner(config, force_cache=False, force_run=False, backend="loky", abor
             #empirical_robustness,
             "time"
         ]
+        
+    # Figure out what runs we care about
+    if fragment_run_start is not None:
+        if fragment_run_end is not None:
+            runs = list(range(fragment_run_start, fragment_run_end+1))
+        else:
+            runs = [fragment_run_start]
+    else:
+        runs = range(config.meta["n_runs"])
     
     try:
         try:
-            cached_config, metrics = __read_result(f"{out_dir()}/{config.serialize()}.csv", config)
+            cached_config, metrics = __read_result(f"{out_dir()}/{config.serialize()}.csv", config, runs=runs)
         except FileNotFoundError as e:
             if config.model_name == None or config.model_name == "svm-linear":
-                cached_config, metrics = __read_result(f"{out_dir()}/{config.serialize_no_model()}.csv", config)
+                cached_config, metrics = __read_result(f"{out_dir()}/{config.serialize_no_model()}.csv", config, runs=runs)
                 cached_config.model_name = "svm-linear"
             else:
                 raise e
@@ -334,13 +347,6 @@ def __run_inner(config, force_cache=False, force_run=False, backend="loky", abor
         try:
             # Seed a random state generator. This seed is constant between methods/datasets/models so comparisons can be made with fewer runs.
             # It is however *variant* with each run.
-            if fragment_run_start is not None:
-                if fragment_run_end is not None:
-                    runs = list(range(fragment_run_start, fragment_run_end+1))
-                else:
-                    runs = [fragment_run_start]
-            else:
-                runs = range(config.meta["n_runs"])
             random_state = [check_random_state(i) for i in runs]
             
             metrics = ProgressParallel(
@@ -422,7 +428,7 @@ def __read_classifiers(config, i=None):
     except FileNotFoundError:
         return CompressedStore(zfile, read=True)
 
-def __read_result(file, config):
+def __read_result(file, config, runs=None):
     if config.meta.get("aggregate", True):
         with open(file, "r") as f:
             cached_config = Config(**{"model_name": "svm-linear", **json.loads(f.readline())})
@@ -430,12 +436,13 @@ def __read_result(file, config):
         return (cached_config, result)
     else:
         results = []
+        # FIXME: This returns runs strictly in order, not the numbers specified by fragment_run_start/fragment_run_end
         for name in glob.glob(f"{out_dir()}/{config.serialize()}_*.csv"):
             with open(name, "r") as f:
                 cached_config = Config(**{"model_name": "svm-linear", **json.loads(f.readline())})
                 results.append(pd.read_csv(f, index_col=0))
-        if len(results) != config.meta.get("n_runs", 10):
-            raise FileNotFoundError("did not find disaggregated runs")
+        if len(results) != (len(runs) or 10):
+            raise FileNotFoundError(f"Did not find disaggregated runs. {len(runs)} expected but found {len(results)}")
         return cached_config, results
 
 

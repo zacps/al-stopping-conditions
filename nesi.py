@@ -104,7 +104,11 @@ capture_metrics = [
     "entropy_max",
     "n_support",
     "contradictory_information",
-    "expected_error"
+    "expected_error",
+    "expected_error_min",
+    "expected_error_max",
+    "expected_error_average",
+    "expected_error_variance",
 ]
 
 def main():
