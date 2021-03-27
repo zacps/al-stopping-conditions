@@ -54,31 +54,48 @@ def active_split(X, Y, test_size=0.5, labeled_size=0.1, shuffle=True, ensure_y=F
     X_train, X_test, Y_train, Y_test = train_test_split(
         X, Y, test_size=test_size, shuffle=shuffle, random_state=random_state
     )
+    
+    # Apply a mutator (noise, unbalance, bias, etc) to the dataset
     X_train, X_test, Y_train, Y_test = mutator(X_train, X_test, Y_train, Y_test, rand=random_state, config_str=config_str, i=i)
-    X_labelled, X_unlabelled, Y_labelled, Y_oracle = train_test_split(
-        X_train,
-        Y_train,
-        test_size=(1 - labeled_size / test_size) if labeled_size < 1 and test_size < 1 else Y_train.shape[0] - labeled_size,
-        shuffle=shuffle,
-        random_state=random_state,
-    )
+    
+    X_labelled = [] if not isinstance(X, scipy.sparse.csr_matrix) else scipy.sparse.csr_matrix(np.array())
+    Y_labelled = []
+    
     # ensure a label for all classes made it in to the initial train and validation sets
-    if ensure_y:
-        for klass in np.unique(Y):
-            if klass not in Y_labelled:
-                idx = np.where(Y_oracle==klass)[0][0]
-                Y_labelled = np.concatenate((Y_labelled, [Y_oracle[idx]]), axis=0)
+    for klass in np.unique(Y):
+        if klass not in Y_labelled:
+            # First value chosen is effectively constant random as the dataset is shuffled
+            idx = np.where(Y_oracle==klass)[0][0]
+            Y_labelled = np.concatenate((Y_labelled, [Y_oracle[idx]]), axis=0)
 
-                if isinstance(X_unlabelled, scipy.sparse.csr_matrix):
-                    X_labelled = csr_vappend(X_labelled, X_unlabelled[idx])
-                else:
-                    X_labelled = np.concatenate((X_labelled, [X_unlabelled[idx]]), axis=0)
-                Y_oracle = np.delete(Y_oracle, idx, axis=0)
-                if isinstance(X_unlabelled, scipy.sparse.csr_matrix):
-                    X_unlabelled = delete_from_csr(X_unlabelled, row_indices=[idx])
-                else:
-                    X_unlabelled = np.delete(X_unlabelled, idx, axis=0)
-
+            if isinstance(X_unlabelled, scipy.sparse.csr_matrix):
+                X_labelled = csr_vappend(X_labelled, X_unlabelled[idx])
+            else:
+                X_labelled = np.concatenate((X_labelled, [X_unlabelled[idx]]), axis=0)
+            Y_oracle = np.delete(Y_oracle, idx, axis=0)
+            if isinstance(X_unlabelled, scipy.sparse.csr_matrix):
+                X_unlabelled = delete_from_csr(X_unlabelled, row_indices=[idx])
+            else:
+                X_unlabelled = np.delete(X_unlabelled, idx, axis=0)
+                    
+    if labeled_size < 1:
+        labeled_size = labeled_size * X.shape[0]
+        
+    if X_labelled.shape[0] < labeled_size:
+        idx = random_state.choice(X_unlabelled.shape[0], labeled_size-X_labelled.shape[0], replace=False)
+        
+        if isinstance(X_unlabelled, scipy.sparse.csr_matrix):
+            X_labelled = csr_vappend(X_labelled, X_unlabelled[idx])
+        else:
+            X_labelled = np.concatenate((X_labelled, [X_unlabelled[idx]]), axis=0)
+        Y_oracle = np.delete(Y_oracle, idx, axis=0)
+        if isinstance(X_unlabelled, scipy.sparse.csr_matrix):
+            X_unlabelled = delete_from_csr(X_unlabelled, row_indices=[idx])
+        else:
+            X_unlabelled = np.delete(X_unlabelled, idx, axis=0)
+                    
+    assert X_labelled.shape[0] == labeled_size
+                
     return X_labelled, X_unlabelled, Y_labelled, Y_oracle, X_test, Y_test
 
 
