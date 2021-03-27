@@ -20,11 +20,7 @@ matrix = {
     "datasets": [
         # Text classification
         
-        # https://citeseerx.ist.psu.edu/viewdoc/download?doi=10.1.1.31.6090&rep=rep1&type=pdf
-        ("newsgroups_faith", wrap(newsgroups, None, ('alt.atheism', 'soc.religion.christian'))),
-        ("newsgroups_graphics", wrap(newsgroups, None, ('comp.graphics', 'comp.windows.x'))),
-        ("newsgroups_hardware", wrap(newsgroups, None, ('comp.os.ms-windows.misc', 'comp.sys.ibm.pc.hardware'))),
-        ("newsgroups_sports_crypto", wrap(newsgroups, None, ('rec.sport.baseball', 'sci.crypt'))),
+        ("newsgroups", wrap(newsgroups, None)),
     
         ("rcv1", wrap(rcv1, None)),
         ("webkb", wrap(webkb, None)),
@@ -70,13 +66,7 @@ matrix = {
     "meta": {
         "dataset_size": 1000,
         "labelled_size": 10,
-        "test_size": {
-            "newsgroups_faith": 500,
-            "newsgroups_graphics": 500,
-            "newsgroups_hardware": 500,
-            "newsgroups_sports_crypto": 500,
-            "*": 0.5
-        },
+        "test_size": 0.5,
         "n_runs": 10,
         "ret_classifiers": True,
         "ensure_y": True,
