@@ -182,6 +182,7 @@ def cardio(dataset_size=1000):
     cache = _cache_restore("cardio")
     if cache is not None:
         X, y = _split(cache[0], cache[1], dataset_size)
+        X, y = _normalize(X, y)
         return X, y
     
     dataset = pd.read_csv(
@@ -201,6 +202,7 @@ def cardio(dataset_size=1000):
 
     _cache_save("cardio", X, y)
     X, y = _split(X, y, dataset_size)
+    X, y = _normalize(X, y)
     return X, y
 
 
@@ -216,6 +218,7 @@ def shuttle(dataset_size=1000):
     cache = _cache_restore("shuttle")
     if cache is not None:
         X, y = _split(cache[0], cache[1], dataset_size)
+        X, y = _normalize(X, y)
         return X, y
     
     dataset1 = pd.read_csv("Imitate/Datasets/shuttle.trn", header=None, sep="\s")
@@ -234,6 +237,7 @@ def shuttle(dataset_size=1000):
 
     _cache_save("shuttle", X, y)
     X, y = _split(X, y, dataset_size)
+    X, y = _normalize(X, y)
     return X, y
 
 
@@ -250,6 +254,7 @@ def skin(dataset_size=1000):
     cache = _cache_restore("skin")
     if cache is not None:
         X, y = _split(cache[0], cache[1], dataset_size)
+        X, y = _normalize(X, y)
         return X, y
     
     url = "https://archive.ics.uci.edu/ml/machine-learning-databases/00229/Skin_NonSkin.txt"
@@ -267,6 +272,7 @@ def skin(dataset_size=1000):
 
     _cache_save("skin", X, y)
     X, y = _split(X, y, dataset_size)
+    X, y = _normalize(X, y)
     return X, y
 
 
@@ -751,6 +757,7 @@ def covertype(dataset_size=1000):
     cache = _cache_restore("covertype")
     if cache is not None:
         X, y = _split(cache[0], cache[1], dataset_size)
+        X, y = _normalize(X, y)
         return X, y
     data = pd.read_csv('https://archive.ics.uci.edu/ml/machine-learning-databases/covtype/covtype.data.gz', header=None)
     y = data.iloc[:,-1].to_numpy()
@@ -759,6 +766,7 @@ def covertype(dataset_size=1000):
     
     _cache_save("covertype", X, y)
     X, y = _split(X, y, dataset_size)
+    X, y = _normalize(X, y)
     return X, y
     
     
@@ -767,6 +775,7 @@ def htru2(dataset_size=1000):
     cache = _cache_restore("htru2")
     if cache is not None:
         X, y = _split(cache[0], cache[1], dataset_size)
+        X, y = _normalize(X, y)
         return X, y
     data = pd.read_csv('datasets/HTRU2/HTRU_2.csv', header=None)
     y = data.iloc[:,-1].to_numpy()
@@ -775,6 +784,7 @@ def htru2(dataset_size=1000):
         
     _cache_save("htru2", X, y)
     X, y = _split(X, y, dataset_size)
+    X, y = _normalize(X, y)
     return X, y
 
 
@@ -804,6 +814,7 @@ def malware(dataset_size=1000):
     cache = _cache_restore("malware")
     if cache is not None:
         X, y = _split(cache[0], cache[1], dataset_size)
+        X, y = _normalize(X, y)
         return X, y
     cols = set(pd.read_csv('datasets/malware/staDynVt2955Lab.csv').columns) & set(pd.read_csv('datasets/malware/staDynVxHeaven2698Lab.csv').columns) & set(pd.read_csv('datasets/malware/staDynBenignLab.csv').columns)
     
@@ -819,6 +830,7 @@ def malware(dataset_size=1000):
         
     _cache_save("malware", X, y)
     X, y = _split(X, y, dataset_size)
+    X, y = _normalize(X, y)
     return X, y
 
 
@@ -947,6 +959,7 @@ def buzz(site, dataset_size=1000):
     cache = _cache_restore("buzz")
     if cache is not None:
         X, y = _split(cache[0], cache[1], dataset_size)
+        X, y = _normalize(X, y)
         return X, y
     path = 'datasets/buzz/classification.tar.gz'
     if not exists(path):
@@ -970,6 +983,7 @@ def buzz(site, dataset_size=1000):
         
     _cache_save("buzz", X, y)
     X, y = _split(X, y, dataset_size)
+    X, y = _normalize(X, y)
     return X, y
 
 
@@ -978,6 +992,7 @@ def sensorless(dataset_size=1000):
     cache = _cache_restore("sensorless")
     if cache is not None:
         X, y = _split(cache[0], cache[1], dataset_size)
+        X, y = _normalize(X, y)
         return X, y
     data = pd.read_csv('https://archive.ics.uci.edu/ml/machine-learning-databases/00325/Sensorless_drive_diagnosis.txt', sep=' ', header=None)
     X = data.iloc[:,:-1].to_numpy()
@@ -986,6 +1001,7 @@ def sensorless(dataset_size=1000):
         
     _cache_save("sensorless", X, y)
     X, y = _split(X, y, dataset_size)
+    X, y = _normalize(X, y)
     return X, y
 
 
@@ -1056,6 +1072,11 @@ def gas(dataset_size=1000):
 def _split(X, y, size):
     if size is not None:
         X, _, y, _ = train_test_split(X, y, train_size=size, random_state=42)
+    return X, y
+
+
+def _normalize(X, y):
+    X = StandardScaler(with_mean=not isinstance(X, scipy.sparse.csr_matrix)).fit_transform(X)
     return X, y
 
     
