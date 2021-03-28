@@ -55,17 +55,21 @@ def active_split(X, Y, test_size=0.5, labeled_size=0.1, shuffle=True, ensure_y=F
         X, Y, test_size=test_size, shuffle=shuffle, random_state=random_state
     )
     
-    # Apply a mutator (noise, unbalance, bias, etc) to the dataset
-    X_train, X_test, Y_train, Y_test = mutator(X_train, X_test, Y_train, Y_test, rand=random_state, config_str=config_str, i=i)
+    unique = np.unique(Y)
     
-    X_labelled = [] if not isinstance(X, scipy.sparse.csr_matrix) else scipy.sparse.csr_matrix(np.array())
-    Y_labelled = []
+    # Apply a mutator (noise, unbalance, bias, etc) to the dataset
+    X_unlabelled, X_test, Y_oracle, Y_test = mutator(X_train, X_test, Y_train, Y_test, rand=random_state, config_str=config_str, i=i)
+    print("X_unlabelled", X_unlabelled.shape, "X_test", X_test.shape, "Y_oracle", Y_oracle.shape, "Y_test", Y_test.shape)
+    X_labelled = [] if not isinstance(X, scipy.sparse.csr_matrix) else scipy.sparse.csr_matrix((0, X.shape[1]))
+    Y_labelled = np.empty(0)
     
     # ensure a label for all classes made it in to the initial train and validation sets
-    for klass in np.unique(Y):
+    for klass in unique:
         if klass not in Y_labelled:
             # First value chosen is effectively constant random as the dataset is shuffled
             idx = np.where(Y_oracle==klass)[0][0]
+            print(f"Adding index {idx}")
+            
             Y_labelled = np.concatenate((Y_labelled, [Y_oracle[idx]]), axis=0)
 
             if isinstance(X_unlabelled, scipy.sparse.csr_matrix):
@@ -80,21 +84,27 @@ def active_split(X, Y, test_size=0.5, labeled_size=0.1, shuffle=True, ensure_y=F
                     
     if labeled_size < 1:
         labeled_size = labeled_size * X.shape[0]
-        
+            
     if X_labelled.shape[0] < labeled_size:
         idx = random_state.choice(X_unlabelled.shape[0], labeled_size-X_labelled.shape[0], replace=False)
+        
+        Y_labelled = np.concatenate((Y_labelled, Y_oracle[idx]), axis=0)
         
         if isinstance(X_unlabelled, scipy.sparse.csr_matrix):
             X_labelled = csr_vappend(X_labelled, X_unlabelled[idx])
         else:
-            X_labelled = np.concatenate((X_labelled, [X_unlabelled[idx]]), axis=0)
+            X_labelled = np.concatenate((X_labelled, X_unlabelled[idx]), axis=0)
         Y_oracle = np.delete(Y_oracle, idx, axis=0)
         if isinstance(X_unlabelled, scipy.sparse.csr_matrix):
             X_unlabelled = delete_from_csr(X_unlabelled, row_indices=[idx])
         else:
             X_unlabelled = np.delete(X_unlabelled, idx, axis=0)
                     
-    assert X_labelled.shape[0] == labeled_size
+    # Sanity checks
+    assert X_labelled.shape[0] == Y_labelled.shape[0] and Y_labelled.shape[0] >= labeled_size, "Labelled length inconsistent"
+    assert X_unlabelled.shape[0] == Y_oracle.shape[0], "Unlabelled length inconsistent"
+    assert X_test.shape[0] == Y_test.shape[0], "Test length inconsistent"
+    assert X_labelled.shape[1] == X_unlabelled.shape[1] == X_test.shape[1], "X shape inconsistent"
                 
     return X_labelled, X_unlabelled, Y_labelled, Y_oracle, X_test, Y_test
 
