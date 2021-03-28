@@ -13,6 +13,7 @@ from sklearn.model_selection import train_test_split
 from sklearn.tree import DecisionTreeClassifier
 from sklearn import datasets
 from sklearn.datasets import fetch_openml
+from sklearn.preprocessing import StandardScaler
 from tabulate import tabulate
 from bs4 import BeautifulSoup
 
