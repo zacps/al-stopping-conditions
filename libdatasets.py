@@ -733,6 +733,7 @@ def smartphone(dataset_size=1000):
     cache = _cache_restore("smartphone")
     if cache is not None:
         X, y = _split(cache[0], cache[1], dataset_size)
+        y = np.squeeze(y)
         return X, y
     # Set header=None?
     X_train = pd.read_csv('datasets/smartphone/Train/X_train.txt', sep=' ')
@@ -746,6 +747,7 @@ def smartphone(dataset_size=1000):
 
     _cache_save("smartphone", X, y)
     X, y = _split(X, y, dataset_size)
+    y = np.squeeze(y)
     return X, y
 
 

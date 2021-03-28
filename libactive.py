@@ -61,7 +61,7 @@ def active_split(X, Y, test_size=0.5, labeled_size=0.1, shuffle=True, ensure_y=F
     X_unlabelled, X_test, Y_oracle, Y_test = mutator(X_train, X_test, Y_train, Y_test, rand=random_state, config_str=config_str, i=i)
     print("X_unlabelled", X_unlabelled.shape, "X_test", X_test.shape, "Y_oracle", Y_oracle.shape, "Y_test", Y_test.shape)
     X_labelled = np.empty((0, X.shape[1])) if not isinstance(X, scipy.sparse.csr_matrix) else scipy.sparse.csr_matrix((0, X.shape[1]))
-    Y_labelled = np.empty(0)
+    Y_labelled = np.empty(0 if len(Y.shape) == 1 else (0, Y.shape[1]))
     
     # ensure a label for all classes made it in to the initial train and validation sets
     for klass in unique:
