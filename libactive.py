@@ -399,6 +399,7 @@ class MyActiveLearner:
             self.learner = self.__setup_learner()
             self.metrics.collect(self.X_labelled.shape[0], self.learner.estimator, self.Y_test, self.X_test)
         else:
+            print("Restoring from checkpoint")
             self = checkpoint
             
         # Classifiers are stored as a local and explicitly restored as they need to be compressed before being stored.
@@ -556,7 +557,7 @@ def store(filename, enable, restore=False):
     
 class CompressedStore:
     """
-    A compressed, progressively writable object store. Writes individual objects as files in a zip archive.
+    A compressed, progressively writable, object store. Writes individual objects as files in a zip archive.
     Can be read lazily and iterated/indexed as if it were a container.
     
     During writing use the context manager `store` to ensure all changes are reflected.
@@ -569,13 +570,18 @@ class CompressedStore:
             mode = 'a'
         else:
             mode = 'w'
-        self.zip = zipfile.ZipFile(filename, mode, compression=zipfile.ZIP_DEFLATED)
+        self.filename = filename
+        self.zip = zipfile.ZipFile(self.filename, mode, compression=zipfile.ZIP_DEFLATED)
         self.i = len(self.zip.namelist())
         
     def append(self, obj):
         self.zip.writestr(str(self.i), pickle.dumps(obj))
         assert len(self.zip.namelist()) == self.i + 1
-        self.i+=1
+        # To survive unexpected interrupts (from OS, not exceptions) we need to write the zip, then re-open it in append mode.
+        # Otherwise changes will be lost because the finalizer doesn't run.
+        self.zip.close()
+        self.zip = zipfile.ZipFile(self.filename, 'a', compression=zipfile.ZIP_DEFLATED)
+        self.i = len(self.zip.namelist())
         
     def __len__(self):
         return self.i
@@ -606,7 +612,6 @@ class CompressedStore:
             i += 1
         
     def close(self):
-        #raise Exception("closed store!")
         self.zip.close()
     
     
