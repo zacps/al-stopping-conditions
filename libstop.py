@@ -38,6 +38,7 @@ Which take a threshold and a number of iterations for which the value should be 
 
 """
 
+from functools import partial
 import numpy as np
 from sklearn import metrics
 from sklearn.metrics import roc_auc_score, f1_score
@@ -413,6 +414,29 @@ def __is_approx_minimum(value, stable_iters=3, threshold=0, **kwargs):
     """
     
     pass
+
+
+# ----------------------------------------------------------------------------------------------
+# Evaluation
+# ----------------------------------------------------------------------------------------------
+
+def eval_stopping_conditions(results_plots, classifiers, conditions=None):
+    if conditions is None:
+        params = {
+            "kappa": {"k": 2}
+        }
+        conditions = {
+            **{f"{f.__name__}": partial(f, **params.get(f.__name__, {})) for f in [uncertainty_min, SC_entropy_mcs, SC_oracle_acc_mcs, EVM, SC_mes, ZPS_ee_grad]},
+            "ZPS2": partial(ZPS, order=2)
+        }
+
+    stop_results = {}
+    for (clfs, (conf, metrics)) in zip(classifiers, results_plots):
+        stop_results[conf.dataset_name] = {}
+        for (name, cond) in conditions.items():
+            stop_results[conf.dataset_name][name] = [cond(**metric, classifiers=clfs_) for clfs_, metric in zip(clfs, metrics)]
+            
+    return (conditions, stop_results)
 
 
 # ----------------------------------------------------------------------------------------------

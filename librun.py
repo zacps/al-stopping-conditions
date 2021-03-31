@@ -13,6 +13,7 @@ from pprint import pprint, pformat
 
 import requests
 import pandas as pd
+import numpy as np
 import matplotlib.pyplot as plt
 try:
     from IPython.core.display import HTML, display
@@ -26,6 +27,8 @@ from sklearn.utils import check_random_state
 from tabulate import tabulate
 
 from libutil import Metrics, average
+from libstop import first_acc, no_ahead_tvregdiff
+from libplot import align_yaxis
 from libactive import active_split, MyActiveLearner, CompressedStore
 
 
@@ -403,6 +406,52 @@ def __run_inner(config, force_cache=False, force_run=False, backend="loky", abor
     return (config, metrics)
 
 
+
+def plot_stop(plots, classifiers, stop_conditions, stop_results, figsize=(26, 4)):
+    figaxes = plot(plots, ret=True, sort=False, extra=2, figsize=figsize)
+    for i, (fig, ax) in enumerate(figaxes):
+        clfs = classifiers[i]
+        metrics = plots[i][1]
+        prop_cycle = plt.rcParams['axes.prop_cycle']
+        colors = prop_cycle.by_key()['color']
+
+        accs = [first_acc(clfs_)[1] for clfs_ in clfs]
+        accx = first_acc(clfs[0])[0]
+
+        acc_median = np.median(accs, axis=0)
+        acc_stderr = np.std(accs, axis=0)
+        
+        ax[-1].plot(metrics[0].x[:acc_median.shape[0]], acc_median)
+        ax[-1].set_title("First classifier accuracy")
+        
+        ax1 = ax[-1].twinx()
+        ax1.axhline(0, ls='--', color='grey', alpha=0.8)
+        ax1.plot(metrics[0].x[:acc_median.shape[0]], no_ahead_tvregdiff(acc_median, 1, 1e-1, plotflag=False, diagflag=False), ls='--')
+
+
+        ax[-2].plot(metrics[0].x, metrics[0].expected_error_min, ls='--')
+        ax[-2].set_title("expected_error_min")
+
+        ax2 = ax[-2].twinx()
+        ax2.axhline(0, ls='--', color='grey', alpha=0.8)
+        ee_first = no_ahead_tvregdiff(metrics[0].expected_error_min[1:], 1, 1e2, plotflag=False, diagflag=False)
+        ee_second = no_ahead_tvregdiff(ee_first[2:], 1, 15, plotflag=False, diagflag=False)
+        ax2.plot(metrics[0].x[1:], ee_first/np.max(np.abs(ee_first[2:])), label='1st')
+        ax2.plot(metrics[0].x[3:], ee_second/np.max(np.abs(ee_second[2:])), label='2nd')
+        ax2.legend()
+
+        align_yaxis(ax[-2], ax2)
+
+        for ii, a in enumerate(ax):        
+            for iii, (name, cond) in enumerate(stop_conditions.items()):
+                stops = stop_results[plots[i][0].dataset_name][name]
+                for iiii, stop in enumerate(stops[:1]):
+                    a.axvline(stop, label=name if ii == 0 and iiii ==0 else None, color=colors[(iii+1) % len(colors)])
+
+        fig.legend()
+        fig.tight_layout()
+
+
 def __write_result(config, result):
     if isinstance(result, list):
         for i in range(len(result)):
@@ -436,13 +485,10 @@ def __read_result(file, config, runs=None):
         return (cached_config, result)
     else:
         results = []
-        # FIXME: This returns runs strictly in order, not the numbers specified by fragment_run_start/fragment_run_end
-        for name in glob.glob(f"{out_dir()}/{config.serialize()}_*.csv"):
+        for name in [f"{out_dir()}/{config.serialize()}_{i}.csv" for i in runs]:
             with open(name, "r") as f:
                 cached_config = Config(**{"model_name": "svm-linear", **json.loads(f.readline())})
                 results.append(pd.read_csv(f, index_col=0))
-        if len(results) != (len(runs) or 10):
-            raise FileNotFoundError(f"Did not find disaggregated runs. {len(runs)} expected but found {len(results)}")
         return cached_config, results
 
 
