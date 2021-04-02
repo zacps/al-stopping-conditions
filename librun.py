@@ -434,7 +434,7 @@ def plot_stop(plots, classifiers, stop_conditions, stop_results, figsize=(26, 4)
 
         ax2 = ax[-2].twinx()
         ax2.axhline(0, ls='--', color='grey', alpha=0.8)
-        ee_first = no_ahead_tvregdiff(metrics[0].expected_error_min[1:], 1, 1e2, plotflag=False, diagflag=False)
+        ee_first = no_ahead_tvregdiff(metrics[0].expected_error_min[1:], 1, 1, plotflag=False, diagflag=False)
         ee_second = no_ahead_tvregdiff(ee_first[2:], 1, 15, plotflag=False, diagflag=False)
         ax2.plot(metrics[0].x[1:], ee_first/np.max(np.abs(ee_first[2:])), label='1st')
         ax2.plot(metrics[0].x[3:], ee_second/np.max(np.abs(ee_second[2:])), label='2nd')

@@ -21,7 +21,6 @@ matrix = {
         # Text classification
         
         ("newsgroups", wrap(newsgroups, None)),
-    
         ("rcv1", wrap(rcv1, None)),
         ("webkb", wrap(webkb, None)),
         ("spamassassin", wrap(spamassassin, None)),
@@ -33,14 +32,14 @@ matrix = {
         
         # General
         ("shuttle", wrap(shuttle, None)),
-        #("covertype", wrap(covertype, None)), # fit takes a million years (1233s for 1000 instances)
+        ("covertype", wrap(covertype, None)),
         ("smartphone", wrap(smartphone, None)),
         ("htru2", wrap(htru2, None)),
-        #("malware", wrap(malware, None)), # MALWARE FIT DID NOT FINISH (07:30:30.xxx CPU time)
+        ("malware", wrap(malware, None)),
         ("bidding", wrap(bidding, None)),
         ("swarm", wrap(swarm, None)),
         ("bank", wrap(bank, None)),
-        ("buzz", wrap(buzz, None)), # Slow fit times
+        ("buzz", wrap(buzz, None)),
         ("sensorless", wrap(sensorless, None)),
         ("dota2", wrap(dota2, None)),
         
