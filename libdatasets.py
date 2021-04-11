@@ -19,7 +19,7 @@ from bs4 import BeautifulSoup
 
 from libutil import dataset_dir
 
-def dataset_summary(names, datasets):
+def dataset_summary(names, datasets, tablefmt=None):
     data = [dataset() for dataset in datasets]
     class_prop=[np.unique(y, return_counts=True) for _, y in data]
 
@@ -29,11 +29,14 @@ def dataset_summary(names, datasets):
             X.shape[0], 
             np.unique(y).shape[0], 
             X.shape[-1], 
-            f"{class_prop[i][0][np.argmax(class_prop[i][1])]} {class_prop[i][1][np.argmax(class_prop[i][1])]/X.shape[0]:.0%}", 
-            f"{class_prop[i][0][np.argmin(class_prop[i][1])]} {class_prop[i][1][np.argmin(class_prop[i][1])]/X.shape[0]:.0%}",
+            #f"{class_prop[i][0][np.argmax(class_prop[i][1])]} {class_prop[i][1][np.argmax(class_prop[i][1])]/X.shape[0]:.0%}", 
+            #f"{class_prop[i][0][np.argmin(class_prop[i][1])]} {class_prop[i][1][np.argmin(class_prop[i][1])]/X.shape[0]:.0%}",
             getattr(datasets[i], "domain", "general")
         ] for i, (X, y) in enumerate(data)
-    ], headers=["Dataset", "Instances", "Classes", "Features", "Most common class", "Least common class", "Domain"]))
+    ], headers=[
+        "Dataset", "Instances", "Classes", "Features", 
+        #"Most common class", "Least common class", 
+        "Domain"], tablefmt=tablefmt))
 
     
 def attr(name, value):
@@ -546,7 +549,7 @@ def quickdraw(dataset_size=1000, classes=("cat", "dolphin", "angel", "face")):
     
     
 @source("https://scikit-learn.org/0.19/datasets/twenty_newsgroups.html")
-@domain("nlp")
+@domain("NLP")
 def newsgroups(dataset_size=1000, categories=None):
     bunch = datasets.fetch_20newsgroups_vectorized(subset='all', remove=('headers'), normalize=True)
     X = bunch.data
@@ -564,7 +567,7 @@ def newsgroups(dataset_size=1000, categories=None):
 
 
 @source("https://archive.ics.uci.edu/ml/datasets/Reuters-21578+Text+Categorization+Collection")
-@domain("nlp")
+@domain("NLP")
 def reuters21578(dataset_size=1000):
     """
     """
@@ -581,7 +584,7 @@ def reuters21578(dataset_size=1000):
     return dataset
 
 
-@domain("nlp")
+@domain("NLP")
 def rcv1(dataset_size=1000, category='CCAT'):
     cache = _cache_restore("rcv1")
     if cache is not None:
@@ -650,7 +653,7 @@ def higgs(dataset_size=1000):
 
 
 @source("http://www.cs.cmu.edu/afs/cs.cmu.edu/project/theo-20/www/data/")
-@domain("nlp")
+@domain("NLP")
 def webkb(dataset_size=1000):
     """
     http://www.cs.cmu.edu/afs/cs.cmu.edu/project/theo-20/www/data/
@@ -684,7 +687,7 @@ def webkb(dataset_size=1000):
 
 
 @source("https://spamassassin.apache.org/old/publiccorpus/")
-@domain("nlp")
+@domain("NLP")
 def spamassassin(dataset_size=1000):
     """
     https://spamassassin.apache.org/old/publiccorpus/
@@ -918,6 +921,7 @@ def anuran(dataset_size=1000):
 
 
 @source("https://archive.ics.uci.edu/ml/datasets/Avila")
+@domain("Image")
 def avila(dataset_size=1000):
     cache = _cache_restore("avila")
     if cache is not None:
