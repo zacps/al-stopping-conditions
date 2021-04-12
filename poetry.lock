@@ -104,12 +104,41 @@ tests = ["coverage[toml] (>=5.0.2)", "hypothesis", "pympler", "pytest (>=4.3.0)"
 tests_no_zope = ["coverage[toml] (>=5.0.2)", "hypothesis", "pympler", "pytest (>=4.3.0)", "six"]
 
 [[package]]
+name = "autorank"
+version = "1.1.1"
+description = "Automated ranking of populations in a repeated measures experiment, e.g., to rank different machine learning approaches tested on the same data."
+category = "main"
+optional = false
+python-versions = "*"
+
+[package.dependencies]
+baycomp = ">=1.0.2"
+matplotlib = ">=3.1.3"
+numpy = "*"
+pandas = ">=0.25.0"
+scipy = ">=1.3.0"
+statsmodels = ">=0.10.0"
+
+[[package]]
 name = "backcall"
 version = "0.2.0"
 description = "Specifications for callback functions passed in to an API"
 category = "dev"
 optional = false
 python-versions = "*"
+
+[[package]]
+name = "baycomp"
+version = "1.0.2"
+description = "Bayesian tests for comparison of classifiers"
+category = "main"
+optional = false
+python-versions = ">=3"
+
+[package.dependencies]
+matplotlib = ">=2.1.2"
+numpy = ">=1.13.1"
+scipy = ">=0.19.1"
 
 [[package]]
 name = "beautifulsoup4"
@@ -1386,7 +1415,7 @@ testing = ["pytest (>=4.6)", "pytest-checkdocs (>=1.2.3)", "pytest-flake8", "pyt
 [metadata]
 lock-version = "1.1"
 python-versions = "^3.7.1,<3.9"
-content-hash = "ce394ea71bd1fb4ed4595b27505783e705a62ac6d82cb301cbdcec4a0ae17976"
+content-hash = "b6cca34fbff93043c4c5b458eae3ce4f09b7c2ac01846818e6e362e53e18a483"
 
 [metadata.files]
 adversarial-robustness-toolbox = [
@@ -1433,9 +1462,17 @@ attrs = [
     {file = "attrs-20.3.0-py2.py3-none-any.whl", hash = "sha256:31b2eced602aa8423c2aea9c76a724617ed67cf9513173fd3a4f03e3a929c7e6"},
     {file = "attrs-20.3.0.tar.gz", hash = "sha256:832aa3cde19744e49938b91fea06d69ecb9e649c93ba974535d08ad92164f700"},
 ]
+autorank = [
+    {file = "autorank-1.1.1-py3-none-any.whl", hash = "sha256:0786004538f1f2f94e14b75e3a88d61c611852557797d8903bfa32d0476753f2"},
+    {file = "autorank-1.1.1.tar.gz", hash = "sha256:03cd47acc5be7dd953a14cb92698644d94748bae3fbafeedb1bb5ac0429e9318"},
+]
 backcall = [
     {file = "backcall-0.2.0-py2.py3-none-any.whl", hash = "sha256:fbbce6a29f263178a1f7915c1940bde0ec2b2a967566fe1c65c1dfb7422bd255"},
     {file = "backcall-0.2.0.tar.gz", hash = "sha256:5cbdbf27be5e7cfadb448baf0aa95508f91f2bbc6c6437cd9cd06e2a4c215e1e"},
+]
+baycomp = [
+    {file = "baycomp-1.0.2-py3-none-any.whl", hash = "sha256:68eae1611a98be002b60246961ec20e3b798e02c757e0e0121755f1b62f444fb"},
+    {file = "baycomp-1.0.2.tar.gz", hash = "sha256:c43472c16bd7cdf4884dd4c73dd307e4a3da7097fe49c83cd5e88d75142923b0"},
 ]
 beautifulsoup4 = [
     {file = "beautifulsoup4-4.9.3-py2-none-any.whl", hash = "sha256:4c98143716ef1cb40bf7f39a8e3eec8f8b009509e74904ba3a7b315431577e35"},
