@@ -10,9 +10,6 @@ import math
 from itertools import groupby
 import glob
 from pprint import pprint, pformat
-import hashlib
-from urllib.request import pathname2url
-
 
 import requests
 import pandas as pd
@@ -53,15 +50,6 @@ class Config:
     def serialize_no_model(self):
         meta_str = "__".join([f"{k}={v}" if k != "stop_function" else f"{k}={v[0]}" for k, v in self.meta.items()])
         return f"{self.dataset_name}__{self.dataset_mutator_name}__{self.method_name}__{meta_str}"
-    
-    def serialize2(self):
-        """
-        Hashes the meta dict to shorten the filename.
-        """
-        meta_str = "__".join([f"{k}={v}" if k != "stop_function" else f"{k}={v[0]}" for k, v in self.meta.items()])
-        hasher = hashlib.sha1(meta_str)
-        meta_hash = pathname2url(hasher.digest()[:10])
-        return f"{self.dataset_name}__{self.dataset_mutator_name}__{self.method_name}__{self.model_name}__{meta_hash}"
 
     def json(self):
         return {
@@ -341,14 +329,11 @@ def __run_inner(config, force_cache=False, force_run=False, backend="loky", abor
         try:
             cached_config, metrics = __read_result(f"{out_dir()}/{config.serialize()}.csv", config, runs=runs)
         except FileNotFoundError as e:
-            try:
-                if config.model_name == None or config.model_name == "svm-linear":
-                    cached_config, metrics = __read_result(f"{out_dir()}/{config.serialize_no_model()}.csv", config, runs=runs)
-                    cached_config.model_name = "svm-linear"
-                else:
-                    raise e
-            except (FileNotFoundError, EOFError, pd.errors.EmptyDataError):
-                cached_config, metrics = __read_result(f"{out_dir()}/{config.serialize2()}.csv", config, runs=runs)
+            if config.model_name == None or config.model_name == "svm-linear":
+                cached_config, metrics = __read_result(f"{out_dir()}/{config.serialize_no_model()}.csv", config, runs=runs)
+                cached_config.model_name = "svm-linear"
+            else:
+                raise e
         if force_run:
             raise FileNotFoundError()
         return (cached_config, metrics)
@@ -384,7 +369,7 @@ def __run_inner(config, force_cache=False, force_run=False, backend="loky", abor
                             ensure_y=config.meta.get("ensure_y", False), 
                             random_state=random_state,
                             mutator=config.dataset_mutator,
-                            config_str=config.serialize2(),
+                            config_str=config.serialize(),
                             i=i
                         ),
                         method,
@@ -393,7 +378,7 @@ def __run_inner(config, force_cache=False, force_run=False, backend="loky", abor
                         ret_classifiers=config.meta.get("ret_classifiers", False),
                         stop_info=config.meta.get("stop_info", False),
                         stop_function=config.meta.get("stop_function", ("default", lambda learner: False))[1],
-                        config_str=config.serialize2(),
+                        config_str=config.serialize(),
                         i=i,
                         pool_subsample=config.meta.get("pool_subsample", None),
                         ee=config.meta.get("ee", "offline")
@@ -413,7 +398,7 @@ def __run_inner(config, force_cache=False, force_run=False, backend="loky", abor
         __write_result(config, metrics)
         for i in range(config.meta['n_runs']):
             try:
-                os.remove(f"{out_dir()}/runs/{config.serialize2()}_{i}.csv")
+                os.remove(f"{out_dir()}/runs/{config.serialize()}_{i}.csv")
             except FileNotFoundError:
                 pass
 
