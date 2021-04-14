@@ -40,10 +40,12 @@ Which take a threshold and a number of iterations for which the value should be 
 
 from functools import partial
 import numpy as np
+import pandas as pd
 from sklearn import metrics
 from sklearn.metrics import roc_auc_score, f1_score
 from tabulate import tabulate
 from statsmodels.stats.inter_rater import fleiss_kappa
+from autorank import autorank, plot_stats
 
 from tvregdiff.tvregdiff import TVRegDiff
 
@@ -510,3 +512,27 @@ def in_bounds(stop_results):
         headers=[k for k in stop_results['bbbp'].keys() if not k.startswith('optimal')],
         tablefmt='fancy_grid'
     ))
+    
+def rank_stop_conds(stop_results, results_plots, metric, title=None, holistic_x=50):
+    data = []
+    # n instances data
+    for i, dataset in enumerate(stop_results.keys()):
+        for ii, method in enumerate(stop_results[dataset].keys()):
+            if i == 0:
+                data.append([])
+            for iii, run in enumerate(stop_results[dataset][method]):
+                if metric == "instances":
+                    data[ii].append(run)
+                elif metric == "holistic":
+                    data[ii].append(
+                        (results_plots[i][1][iii].accuracy_score[results_plots[i][1][iii].x==run].iloc[0]+results_plots[i][1][iii].roc_auc_score[results_plots[i][1][iii].x==run].iloc[0])/2*holistic_x*100-run
+                    )
+                else:
+                    data[ii].append(results_plots[i][1][iii][metric][results_plots[i][1][iii].x==run].iloc[0])
+    data = pd.DataFrame(np.array(data).T, columns=list(stop_results[list(stop_results.keys())[0]].keys()))
+
+    autoranked = autorank(data, order='ascending' if metric == 'instances' else 'descending')
+
+    ax = plot_stats(autoranked)
+    ax.figure.suptitle(title or metric.rsplit("_score")[0].replace("_", " ").title());
+    return ax
