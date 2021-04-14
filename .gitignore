@@ -4,3 +4,4 @@ datasets/
 cache/
 mutator_log/
 .env
+*.vim
