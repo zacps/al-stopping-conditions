@@ -55,11 +55,12 @@ def active_split(X, Y, test_size=0.5, labeled_size=0.1, shuffle=True, ensure_y=F
         X, Y, test_size=test_size, shuffle=shuffle, random_state=random_state
     )
     
-    unique = np.unique(Y)
     
     # Apply a mutator (noise, unbalance, bias, etc) to the dataset
-    X_unlabelled, X_test, Y_oracle, Y_test = mutator(X_train, X_test, Y_train, Y_test, rand=random_state, config_str=config_str, i=i)
-    print("X_unlabelled", X_unlabelled.shape, "X_test", X_test.shape, "Y_oracle", Y_oracle.shape, "Y_test", Y_test.shape)
+    X_unlabelled, X_test, Y_oracle, Y_test = mutator(X_train, X_test, Y_train, Y_test, rand=random_state, config_str=config_str, i=i, test_size=test_size, shuffle=shuffle)
+
+    unique = np.unique(np.concatenate((Y_test, Y_oracle)))
+
     X_labelled = np.empty((0, X.shape[1])) if not isinstance(X, scipy.sparse.csr_matrix) else scipy.sparse.csr_matrix((0, X.shape[1]))
     Y_labelled = np.empty(0 if len(Y.shape) == 1 else (0, Y.shape[1]))
     
@@ -68,7 +69,6 @@ def active_split(X, Y, test_size=0.5, labeled_size=0.1, shuffle=True, ensure_y=F
         if klass not in Y_labelled:
             # First value chosen is effectively constant random as the dataset is shuffled
             idx = np.where(Y_oracle==klass)[0][0]
-            print(f"Adding index {idx}")
             
             Y_labelled = np.concatenate((Y_labelled, [Y_oracle[idx]]), axis=0)
 
