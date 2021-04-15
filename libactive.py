@@ -445,13 +445,11 @@ class MyActiveLearner:
                 self.X_subsampled,
                 unique_labels=self.unique_labels
             )
-            #raise Exception(f"result {result}")
             extra_metrics['expected_error_min'] = np.min(result)
             extra_metrics['expected_error_max'] = np.max(result)
             extra_metrics['expected_error_average'] = np.mean(result)
             extra_metrics['expected_error_variance'] = np.var(result)
-        else:
-            raise Exception("WHAT?")
+            
         extra_metrics['time_ee'] = time.monotonic() - t_ee_start
             
         if "contradictory_information" in self.metrics.metrics:
@@ -487,13 +485,15 @@ class MyActiveLearner:
             self.X_subsampled = self.X_unlabelled[np.random.choice(self.X_unlabelled.shape[0], min(self.pool_subsample, self.X_unlabelled.shape[0]), replace=False)] 
         else:
             self.X_subsampled = self.X_unlabelled
+            
+        extra_metrics['time_total'] = time.monotonic() - t_start
 
         self.metrics.collect(
             self.metrics.frame.x.iloc[-1] + len(query_idx),
             self.learner.estimator,
             self.Y_test,
             self.X_test,
-            time=t_elapsed,
+            time=t_elapsed, # query time
             X_unlabelled=self.X_subsampled,
             unique_labels=self.unique_labels,
             **extra_metrics

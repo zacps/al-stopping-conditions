@@ -189,7 +189,7 @@ def run(
     return results
 
 
-def plot(results, plot_robustness=False, key=None, series=None, title=None, ret=False, sort=True, figsize=(18,4), extra=0):
+def plot(results, plot_robustness=False, key=None, series=None, title=None, ret=False, sort=True, figsize=(18,4), extra=0, scale='linear'):
     if key is None:
         key = lambda config_result: (
             config_result[0].dataset_name,
@@ -244,6 +244,7 @@ def plot(results, plot_robustness=False, key=None, series=None, title=None, ret=
                     )
                 ax.set_xlabel("Instances")
                 ax.set_ylabel(["Accuracy", "F1", "AUC ROC", "Empirical Robustness"][i])
+                ax.set_yscale(scale)
                 plt.suptitle(title(config))
 
         fig.legend()
@@ -327,10 +328,10 @@ def __run_inner(config, force_cache=False, force_run=False, backend="loky", abor
     
     try:
         try:
-            cached_config, metrics = __read_result(f"{out_dir()}/{config.serialize()}.csv", config, runs=runs)
+            cached_config, metrics = __read_result(f"{out_dir()}{os.path.sep}{config.serialize()}.csv", config, runs=runs)
         except FileNotFoundError as e:
             if config.model_name == None or config.model_name == "svm-linear":
-                cached_config, metrics = __read_result(f"{out_dir()}/{config.serialize_no_model()}.csv", config, runs=runs)
+                cached_config, metrics = __read_result(f"{out_dir()}{os.path.sep}{config.serialize_no_model()}.csv", config, runs=runs)
                 cached_config.model_name = "svm-linear"
             else:
                 raise e
@@ -340,7 +341,7 @@ def __run_inner(config, force_cache=False, force_run=False, backend="loky", abor
 
     except (FileNotFoundError, EOFError, pd.errors.EmptyDataError):
         if force_cache:
-            raise Exception(f"Cache file '{out_dir()}/{config.serialize()}.csv' not found")
+            raise Exception(f"Cache file '{out_dir()}{os.path.sep}{config.serialize()}.csv' not found")
             
         if workers is None:
             workers = os.cpu_count()
@@ -398,7 +399,7 @@ def __run_inner(config, force_cache=False, force_run=False, backend="loky", abor
         __write_result(config, metrics)
         for i in range(config.meta['n_runs']):
             try:
-                os.remove(f"{out_dir()}/runs/{config.serialize()}_{i}.csv")
+                os.remove(f"{out_dir()}{os.path.sep}runs{os.path.sep}{config.serialize()}_{i}.csv")
             except FileNotFoundError:
                 pass
 
@@ -407,8 +408,8 @@ def __run_inner(config, force_cache=False, force_run=False, backend="loky", abor
 
 
 
-def plot_stop(plots, classifiers, stop_conditions, stop_results, figsize=(26, 4)):
-    figaxes = plot(plots, ret=True, sort=False, extra=2, figsize=figsize)
+def plot_stop(plots, classifiers, stop_conditions, stop_results, scale='linear', figsize=(26, 4)):
+    figaxes = plot(plots, ret=True, sort=False, extra=2, scale=scale, figsize=figsize)
     for i, (fig, ax) in enumerate(figaxes):
         clfs = classifiers[i]
         metrics = plots[i][1]
@@ -455,13 +456,13 @@ def plot_stop(plots, classifiers, stop_conditions, stop_results, figsize=(26, 4)
 def __write_result(config, result):
     if isinstance(result, list):
         for i in range(len(result)):
-            file = f"{out_dir()}/{config.serialize()}_{i}.csv"
+            file = f"{out_dir()}{os.path.sep}{config.serialize()}_{i}.csv"
             with open(file, "w") as f:
                 json.dump(config.json(), f)
                 f.write("\n")
                 result[i].frame.to_csv(f)
     else:
-        file = f"{out_dir()}/{config.serialize()}.csv"
+        file = f"{out_dir()}{os.path.sep}{config.serialize()}.csv"
         with open(file, "w") as f:
             json.dump(config.json(), f)
             f.write("\n")
@@ -469,8 +470,8 @@ def __write_result(config, result):
         
         
 def __read_classifiers(config, i=None):
-    pfile = f"{out_dir()}/classifiers/{config.serialize()}.pickle"
-    zfile = f"{out_dir()}/classifiers/{config.serialize()}_{i}.zip"
+    pfile = f"{out_dir()}{os.path.sep}classifiers{os.path.sep}{config.serialize()}.pickle"
+    zfile = f"{out_dir()}{os.path.sep}classifiers{os.path.sep}{config.serialize()}_{i}.zip"
     try:
         with open(pfile, "rb") as f:
             return pickle.load(f)
@@ -485,7 +486,7 @@ def __read_result(file, config, runs=None):
         return (cached_config, result)
     else:
         results = []
-        for name in [f"{out_dir()}/{config.serialize()}_{i}.csv" for i in runs]:
+        for name in [f"{out_dir()}{os.path.sep}{config.serialize()}_{i}.csv" for i in runs]:
             with open(name, "r") as f:
                 cached_config = Config(**{"model_name": "svm-linear", **json.loads(f.readline())})
                 results.append(pd.read_csv(f, index_col=0))

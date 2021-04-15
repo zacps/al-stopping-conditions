@@ -82,6 +82,8 @@ capture_metrics = [
     f1_score,
     roc_auc_score,
     "time",
+    "time_total",
+    "time_ee",
     
     "uncertainty_average",
     "uncertainty_min",
