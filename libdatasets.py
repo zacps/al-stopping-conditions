@@ -565,6 +565,25 @@ def newsgroups(dataset_size=1000, categories=None):
     X, y = _split(X, y, dataset_size)
     return X, y
 
+@source("https://scikit-learn.org/0.19/datasets/twenty_newsgroups.html")
+@domain("NLP")
+def newsgroups_svd(dataset_size=1000, categories=None):
+    bunch = datasets.fetch_20newsgroups_vectorized(subset='all', remove=('headers'), normalize=True)
+    X = bunch.data
+    y = bunch.target
+    
+    X = sklearn.decomposition.TruncatedSVD(n_components=100, random_state=42).fit_transform(X)
+    
+    if categories:
+        cat_map = np.array(bunch.target_names)
+        categories_idx = [np.where(cat_map == category) for category in categories]
+        idx = np.isin(y, categories_idx)
+        y = y[idx]
+        X = X[idx]
+    
+    X, y = _split(X, y, dataset_size)
+    return X, y
+
 
 @source("https://archive.ics.uci.edu/ml/datasets/Reuters-21578+Text+Categorization+Collection")
 @domain("NLP")
@@ -682,6 +701,41 @@ def webkb(dataset_size=1000):
 
     
     _cache_save("webkb", X, y)
+    X, y = _split(X, y, dataset_size)
+    return X, y
+
+
+@source("http://www.cs.cmu.edu/afs/cs.cmu.edu/project/theo-20/www/data/")
+@domain("NLP")
+def webkb_svd(dataset_size=1000):
+    """
+    http://www.cs.cmu.edu/afs/cs.cmu.edu/project/theo-20/www/data/
+    """
+
+    cache = _cache_restore("webkb_svd")
+    if cache is not None:
+        X, y = _split(cache[0], cache[1], dataset_size)
+        return X, y
+    classes = ['course', 'faculty', 'project', 'student']
+    universities = ['cornell', 'texas', 'washington', 'wisconsin', 'misc']
+    
+    docs = []
+    for klass_idx, klass in enumerate(classes):
+        for uni in universities:
+            paths = glob.glob(f'datasets/webkb/{klass}/{uni}/*')
+            for path in paths:
+                with open(path, 'r') as file:
+                    soup = BeautifulSoup(file, features='html5lib')
+                docs.append((soup.get_text(), klass))
+                
+    X = [doc[0] for doc in docs]
+    y = np.array([doc[1] for doc in docs])
+    
+    X = sklearn.feature_extraction.text.CountVectorizer(min_df=2).fit_transform(X)
+
+    X = sklearn.decomposition.TruncatedSVD(n_components=100, random_state=42).fit_transform(X)
+    
+    _cache_save("webkb_svd", X, y)
     X, y = _split(X, y, dataset_size)
     return X, y
 
