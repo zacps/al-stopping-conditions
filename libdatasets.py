@@ -572,7 +572,7 @@ def newsgroups_svd(dataset_size=1000, categories=None):
     X = bunch.data
     y = bunch.target
     
-    X = sklearn.decomposition.TruncatedSVD(n_components=100, random_state=42).fit_transform(X)
+    X = sklearn.decomposition.TruncatedSVD(n_components=200, random_state=42).fit_transform(X)
     
     if categories:
         cat_map = np.array(bunch.target_names)
@@ -707,13 +707,13 @@ def webkb(dataset_size=1000):
 
 @source("http://www.cs.cmu.edu/afs/cs.cmu.edu/project/theo-20/www/data/")
 @domain("NLP")
-def webkb_svd(dataset_size=1000):
+def webkb_svd(dataset_size=1000, refresh=False):
     """
     http://www.cs.cmu.edu/afs/cs.cmu.edu/project/theo-20/www/data/
     """
 
     cache = _cache_restore("webkb_svd")
-    if cache is not None:
+    if cache is not None and not refresh:
         X, y = _split(cache[0], cache[1], dataset_size)
         return X, y
     classes = ['course', 'faculty', 'project', 'student']
@@ -733,7 +733,7 @@ def webkb_svd(dataset_size=1000):
     
     X = sklearn.feature_extraction.text.CountVectorizer(min_df=2).fit_transform(X)
 
-    X = sklearn.decomposition.TruncatedSVD(n_components=100, random_state=42).fit_transform(X)
+    X = sklearn.decomposition.TruncatedSVD(n_components=200, random_state=42).fit_transform(X)
     
     _cache_save("webkb_svd", X, y)
     X, y = _split(X, y, dataset_size)
