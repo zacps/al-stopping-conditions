@@ -26,6 +26,7 @@ from sklearn.ensemble import RandomForestClassifier
 from sklearn.naive_bayes import GaussianNB
 from sklearn.neighbors import KNeighborsClassifier
 from sklearn.linear_model import Perceptron
+from sklearn.tree import DecisionTreeClassifier
 from sklearn.base import clone
 from sklearn import calibration
 from sklearn.svm import SVC
@@ -81,7 +82,7 @@ def active_split(X, Y, test_size=0.5, labeled_size=0.1, shuffle=True, ensure_y=F
                 X_unlabelled = delete_from_csr(X_unlabelled, row_indices=[idx])
             else:
                 X_unlabelled = np.delete(X_unlabelled, idx, axis=0)
-                    
+
     if labeled_size < 1:
         labeled_size = labeled_size * X.shape[0]
             
@@ -230,6 +231,13 @@ class MyActiveLearner:
         elif self.model == "random-forest":
             return ActiveLearner(
                 estimator=RandomForestClassifier(),
+                X_training=self.X_labelled,
+                y_training=self.Y_labelled,
+                query_strategy=self.query_strategy,
+            )
+        elif self.model == "decision-tree":
+            return ActiveLearner(
+                estimator=DecisionTreeClassifier(),
                 X_training=self.X_labelled,
                 y_training=self.Y_labelled,
                 query_strategy=self.query_strategy,
