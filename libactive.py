@@ -263,6 +263,16 @@ class MyActiveLearner:
                 y_training=self.Y_labelled,
                 query_strategy=self.query_strategy,
             )
+        elif self.model == "neural-network":
+            return ActiveLearner(
+                estimator=MLPClassifier(
+                    hidden_layer_sizes=(100,), # default
+                    activation='relu', # default
+                ),
+                X_training=self.X_labelled,
+                y_training=self.Y_labelled,
+                query_strategy=self.query_strategy,
+            )
         elif self.model == "committee":
             return Committee(
                 learner_list=[
