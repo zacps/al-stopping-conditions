@@ -27,6 +27,7 @@ from sklearn.naive_bayes import GaussianNB
 from sklearn.neighbors import KNeighborsClassifier
 from sklearn.linear_model import Perceptron
 from sklearn.tree import DecisionTreeClassifier
+from sklearn.neural_network import MLPClassifier
 from sklearn.base import clone
 from sklearn import calibration
 from sklearn.svm import SVC
