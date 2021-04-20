@@ -137,7 +137,7 @@ matrix = {
         ("anuran", wrap(anuran, None)),
     ],
     "dataset_mutators": {
-        "unbalanced10": partial(unbalanced, amount=1e-1)
+        "unbalanced2-50": partial(unbalanced2, amount=5e-1)
     },
     "methods": [
         ("uncertainty", partial(uncertainty_stop, n_instances=10)),
@@ -187,8 +187,8 @@ capture_metrics = [
 
 def main():
     parser = argparse.ArgumentParser()
-    #parser.add_argument('fragment_id', type=int)
-    #parser.add_argument('fragment_length', type=int)
+    parser.add_argument('fragment_id', type=int)
+    parser.add_argument('fragment_length', type=int)
     parser.add_argument('fragment_run')
     parser.add_argument('--dry-run', action='store_true')
 
@@ -205,8 +205,8 @@ def main():
         matrix, 
         metrics=capture_metrics,
         #abort=False,
-        fragment_id=None,
-        fragment_length=None,
+        fragment_id=args.fragment_id,
+        fragment_length=args.fragment_length,
         fragment_run_start=start,
         fragment_run_end=end,
         dry_run=args.dry_run
