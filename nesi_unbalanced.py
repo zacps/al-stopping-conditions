@@ -51,6 +51,73 @@ def unbalanced(X_train, X_test, y_train, y_test, amount=1e-1, rand=None, config_
 
     return X_train, X_test, y_train, y_test
 
+def unbalanced2(X_train, X_test, y_train, y_test, amount=5e-1, rand=None, test_size=None, shuffle=None, **kwargs):
+    """
+    Amount is the fraction that the majority class should take up in the final data. All other classes are reduced to match
+    this proportion.
+    """
+    
+    # TODO: Remove the below, I don't think it's possible to rebalance these sets without ruining the distribution in
+    # one of them which would defeat the whole point.
+            
+    # Re-split the data so the train and test sets will match the split after we remove instances from the train set.
+    #if isinstance(X_train, scipy.sparse.csr_matrix):
+    #    X = csr_vappend(X_train, X_test)
+    #else:
+    #    X = np.concatenate((X_train, X_test))
+    #y = np.concatenate((y_train, y_test))
+    
+    # Find the majority class (ties randomized)
+    #class_prop = np.unique(y, return_counts=True)
+    #majority = rand.choice(class_prop[0][class_prop[1]==class_prop[1].max()])
+    #n_in_majority_class = class_prop[1][class_prop[0]==majority][0]
+    
+    # Join the data based on the number that will be removed
+    #new_total = n_in_majority_class / amount
+    #assert test_size < 1.0
+    #print(
+    #    f"There are {y.shape[0]} total instances.",
+    #    f"\nTest size should be {test_size}. This equates to {y.shape[0]*test_size} instances before removal.",
+    #    f"\nThe new total train set size will be {new_total}"
+    #)
+    #X_train, X_test, y_train, y_test = train_test_split(X, y, shuffle=shuffle, test_size=y.shape[0]-int(test_size*new_total))
+    
+    # Recalculate class proportions
+    class_prop = np.unique(y_train, return_counts=True)
+    majority = rand.choice(class_prop[0][class_prop[1]==class_prop[1].max()])
+    n_in_majority_class = class_prop[1][class_prop[0]==majority]
+    
+    # Reduce all other classes counts so they make up 1-amount total % of the data,
+    # preserving their distribution.
+    Xn = [X_train[y_train==majority]]
+    yn = [y_train[y_train==majority]]
+    for idx, (klass, n) in enumerate(zip(class_prop[0], class_prop[1])):
+        if klass == majority:
+            continue
+            
+        this_class_share = n / np.where(y_train != majority)[0].shape[0]
+        n_this_class = int(n_in_majority_class*(1-amount)/amount*this_class_share)
+        
+        klass = np.where(y_train==klass)[0]
+        new_idx = rand.choice(klass, n_this_class, replace=False)
+        Xn.append(X_train[new_idx])
+        yn.append(y_train[new_idx])
+        
+    #print(Xn)
+    if isinstance(X_train, scipy.sparse.csr_matrix):
+        X_train = scipy.sparse.vstack(Xn)
+    else:
+        X_train = np.concatenate(Xn)
+    y_train = np.concatenate(yn)
+     
+    # Shuffle train set
+    train_idx = rand.choice(y_train.shape[0], y_train.shape[0], replace=False)
+
+    X_train = X_train[train_idx]
+    y_train = y_train[train_idx]
+        
+    return X_train, X_test, y_train, y_test
+
 matrix = {
     # Dataset fetchers should cache if possible
     # Lambda wrapper required for function to be pickleable (sent to other threads via joblib)
@@ -58,8 +125,15 @@ matrix = {
     # rcv1, sensorless, anuran are the only datasets to have >3000 instances after being unbalanced
     # maybe a different approach is better? Something non-binary?
     "datasets": [
-        ("rcv1", wrap(rcv1, None)),
+        #("newsgroups", wrap(newsgroups, None)),
+        #("rcv1", wrap(rcv1, None)),
+        #("webkb", wrap(webkb, None)),
+        #("spamassassin", wrap(spamassassin, None)),
+        ("avila", wrap(avila, None)),
+        #("smartphone", wrap(smartphone, None)),
+        #("swarm", wrap(swarm, None)),
         ("sensorless", wrap(sensorless, None)),
+        #("splice", wrap(splice, None)),
         ("anuran", wrap(anuran, None)),
     ],
     "dataset_mutators": {

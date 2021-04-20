@@ -29,13 +29,13 @@ def dataset_summary(names, datasets, tablefmt=None):
             X.shape[0], 
             np.unique(y).shape[0], 
             X.shape[-1], 
-            #f"{class_prop[i][0][np.argmax(class_prop[i][1])]} {class_prop[i][1][np.argmax(class_prop[i][1])]/X.shape[0]:.0%}", 
-            #f"{class_prop[i][0][np.argmin(class_prop[i][1])]} {class_prop[i][1][np.argmin(class_prop[i][1])]/X.shape[0]:.0%}",
+            f"{class_prop[i][0][np.argmax(class_prop[i][1])]} {class_prop[i][1][np.argmax(class_prop[i][1])]/X.shape[0]:.0%}", 
+            f"{class_prop[i][0][np.argmin(class_prop[i][1])]} {class_prop[i][1][np.argmin(class_prop[i][1])]/X.shape[0]:.0%}",
             getattr(datasets[i], "domain", "general")
         ] for i, (X, y) in enumerate(data)
     ], headers=[
         "Dataset", "Instances", "Classes", "Features", 
-        #"Most common class", "Least common class", 
+        "Most common class", "Least common class", 
         "Domain"], tablefmt=tablefmt))
 
     
