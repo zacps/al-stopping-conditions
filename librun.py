@@ -396,7 +396,7 @@ def __run_inner(config, force_cache=False, force_run=False, backend="loky", abor
         
         if config.meta.get("aggregate", True):
             metrics = metrics[0].average2(metrics[1:])
-        __write_result(config, metrics)
+        __write_result(config, metrics, runs)
         for i in range(config.meta['n_runs']):
             try:
                 os.remove(f"{out_dir()}{os.path.sep}runs{os.path.sep}{config.serialize()}_{i}.csv")
@@ -453,14 +453,14 @@ def plot_stop(plots, classifiers, stop_conditions, stop_results, scale='linear',
         fig.tight_layout()
 
 
-def __write_result(config, result):
+def __write_result(config, result, runs):
     if isinstance(result, list):
-        for i in range(len(result)):
-            file = f"{out_dir()}{os.path.sep}{config.serialize()}_{i}.csv"
+        for r, run in zip(result, runs):
+            file = f"{out_dir()}{os.path.sep}{config.serialize()}_{run}.csv"
             with open(file, "w") as f:
                 json.dump(config.json(), f)
                 f.write("\n")
-                result[i].frame.to_csv(f)
+                r.frame.to_csv(f)
     else:
         file = f"{out_dir()}{os.path.sep}{config.serialize()}.csv"
         with open(file, "w") as f:
