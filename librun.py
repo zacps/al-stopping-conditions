@@ -1,4 +1,5 @@
 import os
+import sys
 import math
 import pickle
 import socket
@@ -114,6 +115,7 @@ def run(
     fragment_run_end=None,
     dry_run=False
 ):
+    print(sys.argv)
     if fragment_id is None:
         __progress_hack()
     configurations = Configurations(matrix)
@@ -161,8 +163,17 @@ def run(
             for config in configurations
         )
         if configurations.meta['ret_classifiers']:
+            # Figure out what runs we care about
+            if fragment_run_start is not None:
+                if fragment_run_end is not None:
+                    runs = list(range(fragment_run_start, fragment_run_end+1))
+                else:
+                    runs = [fragment_run_start]
+            else:
+                runs = range(config.meta["n_runs"])
+            # Retrieve classifiers
             for i, config in enumerate(configurations):
-                results[i] = (results[i], [__read_classifiers(config, j) for j in range(n_runs)])
+                results[i] = (results[i], [__read_classifiers(config, j) for j in runs])
     except Exception as e:
         duration = monotonic()-start
         
