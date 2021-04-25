@@ -3,6 +3,7 @@ import subprocess
 import csv
 import io
 import requests
+import sys
 
 from simple_slurm import Slurm
 
@@ -31,15 +32,15 @@ state = next(jobs)['State']
 if state == 'COMPLETED':
 	print(f'State was {state}, not scheduling next job')
 	sys.exit(0)
-if state != 'TIMEOUT'
+if state != 'TIMEOUT':
 	# TODO: Notify here (discord webhook is the easiest)
 	print(f'State was {state}, not scheduling next job')
 	requests.post(
 		'https://discord.com/api/webhooks/809248326485934080/aIHL726wKxk42YpDI_GtjsqfAWuFplO3QrXoza1r55XRT9-Ao9Rt8sBtexZ-WXSPCtsv',
-		data={'content': f'Job {args.last_job_id} exited with unexpected status {state}'}
+		data={'content': f'Job `{args.last_job_id}` exited with unexpected status `{state}`'}
 	)
 	sys.exit(1)
 
 print('scheduling next job')
-subprocess.run(['poetry', 'run', 'python', 'slurm.py', args.notebook, args.job_name, args.fragment_id, args.fargment_length, args.fragment_run, '--mem', args.mem, '--time', args.time)
+subprocess.run(['poetry', 'run', 'python', 'slurm.py', args.notebook, args.job_name, str(args.fragment_id), str(args.fragment_length), args.fragment_run, f'--mem={args.mem}', f'--time={args.time}'])
 
