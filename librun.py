@@ -14,6 +14,7 @@ from pprint import pprint, pformat
 import requests
 import pandas as pd
 import numpy as np
+import scipy
 import matplotlib.pyplot as plt
 try:
     from IPython.core.display import HTML, display
@@ -24,12 +25,14 @@ from joblib import delayed
 from sklearn.metrics import accuracy_score, f1_score, roc_auc_score
 from sklearn import metrics as skmetrics
 from sklearn.utils import check_random_state
+from sklearn.svm import SVC
 from tabulate import tabulate
 
 from libutil import Metrics, average
 from libstop import first_acc, no_ahead_tvregdiff
 from libplot import align_yaxis
 from libactive import active_split, MyActiveLearner, CompressedStore
+import libdatasets
 
 
 @dataclass
@@ -408,7 +411,7 @@ def __run_inner(config, force_cache=False, force_run=False, backend="loky", abor
 
 
 
-def plot_stop(plots, classifiers, stop_conditions, stop_results, scale='linear', figsize=(26, 4)):
+def plot_stop(plots, classifiers, stop_conditions, stop_results, scale='linear', figsize=(26, 4), lines=None):
     figaxes = plot(plots, ret=True, sort=False, extra=2, scale=scale, figsize=figsize)
     for i, (fig, ax) in enumerate(figaxes):
         clfs = classifiers[i]
@@ -442,6 +445,14 @@ def plot_stop(plots, classifiers, stop_conditions, stop_results, scale='linear',
         ax2.legend()
 
         align_yaxis(ax[-2], ax2)
+        
+        # Add horizontal lines for passive classifier comparison
+        for ii in range(len(lines[i])):
+            mean = np.mean(lines[i][ii])
+            stderr = np.std(lines[i][ii])
+            ax[ii].axhline(mean, color='grey')
+            ax[ii].axhline(mean-stderr, ls='--', color='grey')
+            ax[ii].axhline(mean+stderr, ls='--', color='grey')
 
         for ii, a in enumerate(ax):        
             for iii, (name, cond) in enumerate(stop_conditions.items()):
@@ -492,6 +503,55 @@ def __read_result(file, config, runs=None):
                 results.append(pd.read_csv(f, index_col=0))
         return cached_config, results
 
+    
+# TODO: Put this somewhere more sensible?
+def passive_score(results_plots, mutator=None):
+    """
+    Calculate the score that would have been obtained by a passive learnner on this dataset.
+    """
+    accuracies = []
+    f1s = []
+    roc_aucs = []
+    for idx in range(len(results_plots)):
+        config = results_plots[idx][0]
+        
+        if config.model_name != 'svm-linear':
+            raise Exception('only linear svms are implemented')
+        
+        X, y = getattr(libdatasets, config.dataset_name)(None)
+
+        accuracies.append([])
+        f1s.append([])
+        roc_aucs.append([])
+        for i in range(len(results_plots[idx][1])):
+            X_labelled, X_unlabelled, y_labelled, y_oracle, X_test, y_test = active_split(
+                X, y, labeled_size=config.meta['labelled_size'], test_size=config.meta['test_size'], random_state=check_random_state(i)
+            )
+            if isinstance(X_labelled, scipy.sparse.csr_matrix):
+                X_train = scipy.sparse.vstack((X_labelled, X_unlabelled))
+            else:
+                X_train = np.concatenate((X_labelled, X_unlabelled))
+            y_train = np.concatenate((y_labelled, y_oracle))
+
+            clf = SVC(kernel='linear', probability=True)
+
+            clf.fit(X_train, y_train)
+
+            accuracies[idx].append(accuracy_score(y_test, clf.predict(X_test)))
+            f1s[idx].append(f1_score(
+                y_test, clf.predict(X_test),
+                average="micro" if len(np.unique(y)) > 2 else "binary",
+                pos_label=np.unique(y)[1] if len(np.unique(y)) <= 2 else 1,
+            ))
+            if len(np.unique(y)) > 2 or len(y.shape) > 1:
+                roc_aucs[idx].append(roc_auc_score(
+                    y_test, clf.predict_proba(X_test), multi_class="ovr"
+                ))
+            else:
+                roc_aucs[idx].append(roc_auc_score(
+                    y_test, clf.predict_proba(X_test)[:, 1]
+                ))
+    return accuracies, f1s, roc_aucs
 
 def __progress_hack():
     # Annoying hack so that the progressbars disapear as they're supposed to

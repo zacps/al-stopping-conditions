@@ -41,8 +41,11 @@ Which take a threshold and a number of iterations for which the value should be 
 from functools import partial
 import numpy as np
 import pandas as pd
+from sklearn.cluster import SpectralClustering
 from sklearn import metrics
+from sklearn.utils import check_random_state
 from sklearn.metrics import roc_auc_score, f1_score
+from libactive import active_split
 from tabulate import tabulate
 from statsmodels.stats.inter_rater import fleiss_kappa
 from autorank import autorank, plot_stats
@@ -165,6 +168,68 @@ def EVM(x, uncertainty_variance, uncertainty_variance_selected, selected=True, n
             current += 1
         last = value
     return x.iloc[-1]
+
+
+def SSNCut(config, classifiers, i, m=.2, affinity='linear', **kwargs):
+    """
+    NOTES:
+    * They used an RBF svm to match the RBF affinity measure for SpectralClustering
+    * As we carry out experiments on a linear svm we also use a linear affinity matrix (by default)
+    
+    file:///F:/Documents/Zotero/storage/DJGRDXSK/Fu%20and%20Yang%20-%202015%20-%20Low%20density%20separation%20as%20a%20stopping%20criterion%20for.pdf
+    """
+    unique_y = np.unique(classifiers[0].y_training)
+    if len(unique_y) > 2:
+        print("WARNING: SSNCut is not designed for non-binary classification")
+        
+    clustering = SpectralClustering(n_clusters=unique_y, affinity=affinity)
+    
+    out = []
+    
+    for clf in classifiers:
+        X_unlabelled = reconstruct_unlabelled(config, clf, i)
+        # Note: With non-binary classification the value of the decision function is a transformation of the distance...
+        order = np.argsort(np.abs(clf.estimator.decision_function(X_unlabelled)))
+        M = X_unlabelled[order[:min(1000, int(m*X_unlabelled.shape[0]))]]
+
+        y0 = clf.predict(M)
+        # use algorithm 1
+        print("before fit_predict")
+        print(M.shape, M.dtype, M.nnz, M.data.shape, M.indices.shape, M.indptr.shape)
+        y1 = clustering.fit_predict(M)
+        print("after fit_predict")
+
+        diff = np.sum(y0==y1)/X_unlabelled.shape[0]
+        if diff > 0.5:
+            diff = 1 - diff
+        out.append(diff)
+            
+    return out
+
+
+def reconstruct_unlabelled(config, clf, i):
+    import libdatasets
+    import scipy
+    X, y = getattr(libdatasets, config.dataset_name)(None)
+    rand = check_random_state(i)
+    if config.dataset_mutator_name != 'none':
+        raise UnimplementedError("WARNING: Dataset mutation is not implemented in reconstruct_unlabelled")
+    X_labelled, X_unlabelled, Y_labelled, Y_oracle, X_teset, Y_test = active_split(
+        X, y, labeled_size=config.meta['labelled_size'], test_size=config.meta['test_size'], random_state=rand, ensure_y=config.meta['ensure_y'])
+    
+    if not isinstance(X, scipy.sparse.csr_matrix):
+        return X_unlabelled[(X_unlabelled[:,np.newaxis]!=clf.X_training).all(-1).any(-1)]
+    
+    def compare(A, B):
+        "https://stackoverflow.com/questions/23124403/how-to-compare-2-sparse-matrix-stored-using-scikit-learn-library-load-svmlight-f"
+        return zip(*np.where((np.array(A.multiply(A).sum(1)) +
+            np.array(B.multiply(B).sum(1)).T) - 2 * A.dot(B.T).toarray() == 0))
+    
+    from libactive import delete_from_csr
+
+    print(list(compare(X_unlabelled, clf.X_training)))
+    return delete_from_csr(X_unlabelled, compare(X_unlabelled, clf.X_training))
+
 
 def n_support(x, classifiers, n_support, **kwargs):
     """
@@ -436,7 +501,7 @@ def eval_stopping_conditions(results_plots, classifiers, conditions=None):
     for (clfs, (conf, metrics)) in zip(classifiers, results_plots):
         stop_results[conf.dataset_name] = {}
         for (name, cond) in conditions.items():
-            stop_results[conf.dataset_name][name] = [cond(**metric, classifiers=clfs_) for clfs_, metric in zip(clfs, metrics)]
+            stop_results[conf.dataset_name][name] = [cond(**metric, classifiers=clfs_, config=conf) for clfs_, metric in zip(clfs, metrics)]
             
     return (conditions, stop_results)
 
