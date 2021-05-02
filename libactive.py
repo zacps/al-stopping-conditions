@@ -423,9 +423,6 @@ class MyActiveLearner:
             
         # Classifiers are stored as a local and explicitly restored as they need to be compressed before being stored.
         with store(f"{out_dir()}/classifiers/{self.config_str}_{self.i}.zip", enable=self.ret_classifiers, restore=checkpoint is not None) as classifiers:
-            if self.ret_classifiers and len(classifiers) == 0:
-                classifiers.append(deepcopy(self.learner))
-
             # Initial subsampling, this should probably be done somewhere else tbh...
             if checkpoint is None:
                 if self.pool_subsample is not None:
@@ -433,7 +430,14 @@ class MyActiveLearner:
                     self.X_subsampled = self.X_unlabelled[np.random.choice(self.X_unlabelled.shape[0], self.pool_subsample, replace=False)] 
                 else:
                     self.X_subsampled = self.X_unlabelled
-
+            
+            if self.ret_classifiers and len(classifiers) == 0:
+                # Store the unlabelled pool with the classifier
+                self.learner.y_unlabelled = self.Y_oracle
+                self.learner.X_unlabelled = self.X_unlabelled
+                classifiers.append(deepcopy(self.learner))
+            
+            # Do the active learning!
             while self.X_unlabelled.shape[0] != 0 and not self.stop_function(self.learner):
                 
                 self.active_learn_iter(classifiers)
@@ -519,7 +523,9 @@ class MyActiveLearner:
         )
 
         if self.ret_classifiers:
-            classifiers.append(deepcopy(self.learner))
+            self.learner.y_unlabelled = self.Y_oracle
+            self.learner.X_unlabelled = self.X_unlabelled
+            classifiers.append(self.learner)
 
         self._checkpoint(self)
         
@@ -617,7 +623,7 @@ class CompressedStore:
                 raise IndexError(f"index {i} out of range for store of length {self.i}")
             
         if i < 0:
-            i = self.i - i
+            i = self.i-1 - i
         try:
             return pickle.Unpickler(self.zip.open(str(i))).load()
         except KeyError:
