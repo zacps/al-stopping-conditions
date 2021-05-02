@@ -145,7 +145,7 @@ def run(
             workers = len(os.sched_getaffinity(0))
 
     if fragment_run_start is not None:
-        n_runs = (fragment_run_end-fragment_run_start) if fragment_run_end is not None else 1
+        n_runs = (fragment_run_end-fragment_run_start+1) if fragment_run_end is not None else 1
     else:
         n_runs = configurations.meta['n_runs']
 
@@ -335,7 +335,7 @@ def __run_inner(config, force_cache=False, force_run=False, backend="loky", abor
         else:
             runs = [fragment_run_start]
     else:
-        runs = range(config.meta["n_runs"])
+        runs = list(range(config.meta["n_runs"]))
     
     try:
         try:
@@ -365,8 +365,8 @@ def __run_inner(config, force_cache=False, force_run=False, backend="loky", abor
             random_state = [check_random_state(i) for i in runs]
             
             metrics = ProgressParallel(
-                n_jobs=min(config.meta["n_runs"], workers),
-                total=config.meta["n_runs"],
+                n_jobs=min(len(runs), workers),
+                total=len(runs),
                 desc=f"Run",
                 leave=False,
                 backend=backend,
@@ -407,8 +407,9 @@ def __run_inner(config, force_cache=False, force_run=False, backend="loky", abor
         
         if config.meta.get("aggregate", True):
             metrics = metrics[0].average2(metrics[1:])
+
         __write_result(config, metrics, runs)
-        for i in range(config.meta['n_runs']):
+        for i in runs:
             try:
                 os.remove(f"{out_dir()}{os.path.sep}runs{os.path.sep}{config.serialize()}_{i}.csv")
             except FileNotFoundError:
