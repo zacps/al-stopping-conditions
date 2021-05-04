@@ -38,16 +38,25 @@ Which take a threshold and a number of iterations for which the value should be 
 
 """
 
+import time
+import itertools
 from functools import partial
+
 import numpy as np
 import pandas as pd
+import scipy
+from sklearn.cluster import SpectralClustering
 from sklearn import metrics
-from sklearn.metrics import roc_auc_score, f1_score
+from sklearn.utils import check_random_state
+from sklearn.metrics import roc_auc_score, f1_score, cohen_kappa_score
+from sklearn.preprocessing import LabelEncoder
+from libactive import active_split
 from tabulate import tabulate
 from statsmodels.stats.inter_rater import fleiss_kappa
 from autorank import autorank, plot_stats
-
 from tvregdiff.tvregdiff import TVRegDiff
+
+import libdatasets
 
 
 def optimal_ub(x, accuracy_score, f1_score, roc_auc_score, **kwargs):
@@ -166,6 +175,112 @@ def EVM(x, uncertainty_variance, uncertainty_variance_selected, selected=True, n
         last = value
     return x.iloc[-1]
 
+
+def SSNCut(x, classifiers, X_unlabelled, m=.2, affinity='linear', **kwargs):
+    if len(np.unique(classifiers[0].y_training)) > 2:
+        return x.iloc[-1]
+    values = SSNCut_values(classifiers, X_unlabelled, m=.2, affinity='linear')
+    
+    smallest = np.infty
+    x0 = 0
+    for i, v in enumerate(values):
+        if v < smallest:
+            smallest = v
+            x0 = 0
+        else:
+            x0 += 1
+        if x0 == 10:
+            return x.iloc[i-10] # return to the point of lowest value
+            
+    
+
+def SSNCut_values(classifiers, i, m=.2, affinity='linear', **kwargs):
+    """
+    NOTES:
+    * They used an RBF svm to match the RBF affinity measure for SpectralClustering
+    * As we carry out experiments on a linear svm we also use a linear affinity matrix (by default)
+    
+    file:///F:/Documents/Zotero/storage/DJGRDXSK/Fu%20and%20Yang%20-%202015%20-%20Low%20density%20separation%20as%20a%20stopping%20criterion%20for.pdf
+    """
+    unique_y = np.unique(classifiers[0].y_training)
+    if len(unique_y) > 2:
+        print("WARNING: SSNCut is not designed for non-binary classification")
+        
+    clustering = SpectralClustering(n_clusters=unique_y.shape[0], affinity=affinity)
+    
+    out = []
+    # Reconstruct the unlabelled pool if this run didn't save the unlabelled pool
+    if hasattr(classifiers[0], 'X_unlabelled'):
+        # Don't store all pools in memory, generator expression
+        X_unlabelleds = (clf.X_unlabelled for clf in classifiers)
+    else:
+        X_unlabelleds = reconstruct_unlabelled(classifiers, X_unlabelled)
+        
+    for i, (clf, X_unlabelled) in enumerate(zip(classifiers, X_unlabelleds)):
+        print(f"{i}/{len(classifiers)}")
+        t0 = time.monotonic()
+        # Note: With non-binary classification the value of the decision function is a transformation of the distance...
+        order = np.argsort(np.abs(clf.estimator.decision_function(X_unlabelled)))
+        M = X_unlabelled[order[:min(1000, int(m*X_unlabelled.shape[0]))]]
+
+        y0 = clf.predict(M)
+        # use algorithm 1
+        scipy.sparse.save_npz('M.npz', M)
+        y1 = clustering.fit_predict(M)
+
+        y0 = LabelEncoder().fit_transform(y0)
+        diff = np.sum(y0==y1)/X_unlabelled.shape[0]
+        if diff > 0.5:
+            diff = 1 - diff
+        out.append(diff)
+        print(f"SSNCut took {time.monotonic()-t0}")
+            
+    return out
+
+
+def reconstruct_unlabelled(clfs, X_unlabelled):
+    """
+    Reconstruct the unlabelled pool from stored information. We do not directly store the unlabelled pool,
+    but we store enough information to reproduce it. This was used to compute stopping conditions implemented
+    after some experiments had been started.
+    """
+    import libdatasets
+    
+    
+    if not isinstance(X, scipy.sparse.csr_matrix):
+        # TODO: Currently broken (should be a generator for each classifier)
+        # but there are no binary non-sparse datasets so *shrug*
+        return X_unlabelled[(X_unlabelled[:,np.newaxis]!=clf.X_training).all(-1).any(-1)]
+    
+    # Fast row-wise compare function
+    def compare(A, B):
+        "https://stackoverflow.com/questions/23124403/how-to-compare-2-sparse-matrix-stored-using-scikit-learn-library-load-svmlight-f"
+        return np.where(np.isclose((np.array(A.multiply(A).sum(1)) +
+            np.array(B.multiply(B).sum(1)).T) - 2 * A.dot(B.T).toarray(), 0))
+    
+    from libactive import delete_from_csr
+
+    last_n = 0
+    for clf in clfs:
+        t0 = time.monotonic()
+        equal_rows = compare(X_unlabelled, clf.X_training)
+        # Some datasets (rcv1) contain duplicates. These were only queried once, so we make sure we only remove a single
+        # copy from the unlabelled pool.
+        really_equal_rows = []
+        for clf_idx in np.unique(equal_rows[1]):
+            dupes = equal_rows[0][equal_rows[1]==clf_idx]
+            # some datasets have duplicates with differing labels (rcv1)
+            dupes_correct_label = dupes[Y_oracle[dupes]==clf.y_training[clf_idx]][0]
+            really_equal_rows.append(dupes_correct_label)
+            
+        
+        assert len(really_equal_rows) == last_n
+        last_n += 10
+        ret = delete_from_csr(X_unlabelled, really_equal_rows).copy()
+        print(f"reconstruct took {time.monotonic()-t0}")
+        yield ret
+
+
 def n_support(x, classifiers, n_support, **kwargs):
     """
     Determine a stopping point based on when the number of support vectors saturates.
@@ -181,22 +296,22 @@ def n_support(x, classifiers, n_support, **kwargs):
     return x.iloc[__is_approx_constant(n_support, **kwargs)]
 
 
-def kappa(x, classifiers, k=3, threshold=0.99, **kwargs):
+def stabilizing_predictions(x, classifiers, X_unlabelled, k=3, threshold=0.99, **kwargs):
     """
     Determine a stopping point based on agreement between past classifiers on a stopping
     set. 
     
-    This implementation currently uses *all* non-validation data as the stop set, this 
-    differs from the paper which used ~2000 instances from the pool.
+    This implementation uses a subsampled pool of 1000 instances, like all other methods we
+    evaluate, as supposed to the 2000 suggested in the paper.
     
     * `k` determines how many classifiers are checked for agreement 
     * `threshold` determines the kappa level that must be reached to halt
     
     https://arxiv.org/pdf/1409.5165.pdf
     """
-    metric = kappa_metric(x, classifiers, k)
+    metric = kappa_metric(x, classifiers, X_unlabelled, k=k)
     if not (metric >=threshold).any():
-        return x[-1]
+        return x.iloc[-1]
     return x[np.argmax(metric>=threshold)]
 
 
@@ -223,19 +338,20 @@ def uncertainty_min(x, uncertainty_min, **kwargs):
     return x.iloc[__is_within_bound(uncertainty_min, **kwargs)]
 
 
-def ZPS(classifiers, order=1, **kwargs):
+def ZPS(classifiers, order=1, safety_factor=1.0, **kwargs):
     """
     Determine a stopping point based on the accuracy of previously trained classifiers.
     """
+    assert safety_factor >= 1.0, "safety factor cannot be less than 1"
     accx, _acc = first_acc(classifiers)
     grad = np.array(no_ahead_tvregdiff(_acc, 1, 1e-1, plotflag=False, diagflag=False))
     start = np.argmax(grad < 0)
     
     if order == 2:
         second = np.array([np.nan, np.nan, *no_ahead_tvregdiff(grad[2:], 1, 1e-1, plotflag=False, diagflag=False)])
-        return accx[np.argmax((grad[start:] >= 0) & (second[start:] >= 0)) + start]
+        return accx[int((np.argmax((grad[start:] >= 0) & (second[start:] >= 0)) + start)*safety_factor)]
     
-    return accx[np.argmax(grad[start:] >= 0)+start]
+    return accx[int((np.argmax(grad[start:] >= 0)+start)*safety_factor)]
 
 
 # ----------------------------------------------------------------------------------------------
@@ -330,15 +446,55 @@ def first_acc(classifiers, metric=metrics.accuracy_score):
     return x, diffs
 
 
-def kappa_metric(x, classifiers, k=3, **kwargs):
+# Maybe viable but completely wrong
+def kappa_metric_but_not_and_broken(x, classifiers, X_unlabelled, k=3, **kwargs):
     from sklearn.preprocessing import OneHotEncoder
     
     out = [np.nan, np.nan]
-    for i, clf in enumerate(classifiers[k-1:]):
-        clfs = [*[classifiers[-i] for i in range(1, k)], clf]
+    classes = np.unique(classifiers[0].y_training)
+    enc = LabelEncoder()
+    enc.fit(classifiers[0].y_training)
+    
         
-        # FIXME: Shouldn't this be clf.predict(clfs[-1].X_training) ?
-        kappa = fleiss_kappa(np.sum([OneHotEncoder().fit_transform(clf.predict(classifiers[-1].X_training).reshape(-1, 1)).todense() for clf in clfs], axis=0))
+    predictions = np.array([enc.transform(clf.predict(X_unlabelled)) for clf in classifiers])
+    probabilities = []
+    for preds in predictions:
+        probabilities.append([])
+        values = np.unique(preds, return_counts=True)
+        for klass in enc.transform(classes):
+            v = values[1][values[0]==klass]
+            v = v[0] if v.shape[0] > 0 else 0
+            probabilities[-1].append(v/X_unlabelled.shape[0])
+        #for klass in enc.transform(classes):
+        #    probabilities[-1].append(np.count_nonzero(preds==klass)/X_unlabelled.shape[0])
+    probabilities = np.array(probabilities)
+    print(probabilities)
+    for i in range(2, len(classifiers)):
+        k1 = np.sum(probabilities[i]*probabilities[i-1])
+        k2 = np.sum(probabilities[i]*probabilities[i-2])
+        k3 = np.sum(probabilities[i-1]*probabilities[i-2])
+        assert k1 != np.nan and k2 != np.nan and k3 != np.nan
+        kappa = np.mean([k1, k2, k3])
+        
+        out.append(kappa)
+
+    return np.array(out)
+
+
+def kappa_metric(x, classifiers, X_unlabelled, k=3, **kwargs):
+    from sklearn.preprocessing import OneHotEncoder
+    
+    out = [np.nan] * (k-1)
+    classes = np.unique(classifiers[0].y_training)
+    
+    # Authors used 2000, but probably better to go with our standard 1000
+    X_subsampled = X_unlabelled[np.random.choice(X_unlabelled.shape[0], 1000, replace=False)] 
+    predictions = np.array([clf.predict(X_subsampled) for clf in classifiers])
+        
+    for i in range(k-1, len(classifiers)):
+        # Average the pairwise kappa score over the last k classifiers.
+        kappa = np.mean([cohen_kappa_score(x,y) for x,y in itertools.combinations(predictions[i-k+1:i+1], 2)])
+        
         out.append(kappa)
 
     return np.array(out)
@@ -428,15 +584,38 @@ def eval_stopping_conditions(results_plots, classifiers, conditions=None):
             "kappa": {"k": 2}
         }
         conditions = {
-            **{f"{f.__name__}": partial(f, **params.get(f.__name__, {})) for f in [uncertainty_min, SC_entropy_mcs, SC_oracle_acc_mcs, EVM, SC_mes, ZPS_ee_grad]},
-            "ZPS2": partial(ZPS, order=2)
+            **{f"{f.__name__}": partial(f, **params.get(f.__name__, {})) for f in [
+                uncertainty_min, 
+                SC_entropy_mcs, 
+                SC_oracle_acc_mcs, 
+                SC_mes,
+                EVM, 
+                ZPS_ee_grad, 
+                stabilizing_predictions
+            ]},
+            "ZPS2": partial(ZPS, order=2),
+            #"SSNCut": SSNCut
         }
+    
 
     stop_results = {}
     for (clfs, (conf, metrics)) in zip(classifiers, results_plots):
         stop_results[conf.dataset_name] = {}
+        
+        if 'stabilizing_predictions' in conditions.keys() or 'SSNCut' in conditions.keys():
+            X, y = getattr(libdatasets, conf.dataset_name)(None)
+            unlabelled_pools = []
+            # WARN: This is not the same as the job numbers! Unfortunately they're not easily accessible
+            for i in range(len(clfs)):
+                _, X_unlabelled, _, _, _, _ = active_split(
+                    X, y, labeled_size=conf.meta['labelled_size'], test_size=conf.meta['test_size'], random_state=check_random_state(i), ensure_y=conf.meta['ensure_y']
+                )
+                unlabelled_pools.append(X_unlabelled)
+        else:
+            unlabelled_pools = [None] * len(clfs)
+        
         for (name, cond) in conditions.items():
-            stop_results[conf.dataset_name][name] = [cond(**metric, classifiers=clfs_) for clfs_, metric in zip(clfs, metrics)]
+            stop_results[conf.dataset_name][name] = [cond(**metric, classifiers=clfs_, config=conf, X_unlabelled=X_unlabelled) for clfs_, metric, X_unlabelled in zip(clfs, metrics, unlabelled_pools)]
             
     return (conditions, stop_results)
 

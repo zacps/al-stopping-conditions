@@ -441,19 +441,19 @@ def plot_stop(plots, classifiers, stop_conditions, stop_results, scale='linear',
         ax1.axhline(0, ls='--', color='grey', alpha=0.8)
         ax1.plot(metrics[0].x[:acc_median.shape[0]], no_ahead_tvregdiff(acc_median, 1, 1e-1, plotflag=False, diagflag=False), ls='--')
 
+        if 'expected_error_min' in metrics[0]:
+            ax[-2].plot(metrics[0].x, metrics[0].expected_error_min, ls='--')
+            ax[-2].set_title("expected_error_min")
 
-        ax[-2].plot(metrics[0].x, metrics[0].expected_error_min, ls='--')
-        ax[-2].set_title("expected_error_min")
+            ax2 = ax[-2].twinx()
+            ax2.axhline(0, ls='--', color='grey', alpha=0.8)
+            ee_first = no_ahead_tvregdiff(metrics[0].expected_error_min[1:], 1, 1e2, plotflag=False, diagflag=False)
+            ee_second = no_ahead_tvregdiff(ee_first[2:], 1, 15, plotflag=False, diagflag=False)
+            ax2.plot(metrics[0].x[1:], ee_first/np.max(np.abs(ee_first[2:])), label='1st')
+            ax2.plot(metrics[0].x[3:], ee_second/np.max(np.abs(ee_second[2:])), label='2nd')
+            ax2.legend()
 
-        ax2 = ax[-2].twinx()
-        ax2.axhline(0, ls='--', color='grey', alpha=0.8)
-        ee_first = no_ahead_tvregdiff(metrics[0].expected_error_min[1:], 1, 1e2, plotflag=False, diagflag=False)
-        ee_second = no_ahead_tvregdiff(ee_first[2:], 1, 15, plotflag=False, diagflag=False)
-        ax2.plot(metrics[0].x[1:], ee_first/np.max(np.abs(ee_first[2:])), label='1st')
-        ax2.plot(metrics[0].x[3:], ee_second/np.max(np.abs(ee_second[2:])), label='2nd')
-        ax2.legend()
-
-        align_yaxis(ax[-2], ax2)
+            align_yaxis(ax[-2], ax2)
 
         for ii, a in enumerate(ax):        
             for iii, (name, cond) in enumerate(stop_conditions.items()):
