@@ -6,6 +6,7 @@ Takes the following CLI arguments:
 """
 
 import argparse
+import os
 from dotenv import load_dotenv
 
 from sklearn.metrics import accuracy_score, f1_score, roc_auc_score
@@ -81,10 +82,11 @@ capture_metrics = [
 
 def main():
     parser = argparse.ArgumentParser()
-    #parser.add_argument('fragment_id', type=int)
-    #parser.add_argument('fragment_length', type=int)
+    parser.add_argument('fragment_id', type=int)
+    parser.add_argument('fragment_length', type=int)
     parser.add_argument('fragment_run')
     parser.add_argument('--dry-run', action='store_true')
+    parser.add_argument('--nobackup', action='store_true')
 
     args = parser.parse_args()
 
@@ -95,12 +97,15 @@ def main():
     else:
         end = None
 
+    if args.nobackup:
+        os.environ['OUT_DIR'] = "/home/zpul156/out_nobackup"
+
     librun.run(
         matrix, 
         metrics=capture_metrics,
         #abort=False,
-        fragment_id=None,
-        fragment_length=None,
+        fragment_id=args.fragment_id,
+        fragment_length=args.fragment_length,
         fragment_run_start=start,
         fragment_run_end=end,
         dry_run=args.dry_run

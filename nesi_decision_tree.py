@@ -15,13 +15,6 @@ import librun
 from libdatasets import *
 from libadversarial import uncertainty_stop
 
-def noise(X_train, X_test, y_train, y_test, amount=1e-1, rand=None, config_str=None, i=None, **kwargs):
-    n = int(y_train.shape[0]*amount)
-    idx = rand.randint(0, y_train.shape[0], n)
-    replacements = rand.choice(np.unique(y_train), n)
-    y_train[idx] = replacements
-    return X_train, X_test, y_train, y_test
-
 matrix = {
     # Dataset fetchers should cache if possible
     # Lambda wrapper required for function to be pickleable (sent to other threads via joblib)
@@ -37,15 +30,22 @@ matrix = {
         ("splice", wrap(splice, None)),
         ("anuran", wrap(anuran, None)),
         
+	# These datasets are not part of 'base', but do provide a large enough change
+	# to be considered for inclusion.
+	# TODO: Ask Joerg's thoughts on running/including these.
+        #("covertype", wrap(covertype, None)),
+        #("malware", wrap(malware, None)),
+        #("shuttle", wrap(shuttle, None)),
+	#("quickdraw", wrap(quickdraw, None)),
     ],
     "dataset_mutators": {
-        "noise20": partial(noise, amount=2e-1)
+        "none": (lambda *x, **kwargs: x),
     },
     "methods": [
         ("uncertainty", partial(uncertainty_stop, n_instances=10)),
     ],
     "models": [
-        "svm-linear"
+        "decision-tree"
     ],
     "meta": {
         "dataset_size": 1000,
@@ -78,7 +78,7 @@ capture_metrics = [
     "uncertainty_max_selected",
     "uncertainty_variance_selected",
     "entropy_max",
-    "n_support",
+    #"n_support",
     "contradictory_information",
     "expected_error",
     "expected_error_min",
@@ -89,8 +89,8 @@ capture_metrics = [
 
 def main():
     parser = argparse.ArgumentParser()
-    #parser.add_argument('fragment_id', type=int)
-    #parser.add_argument('fragment_length', type=int)
+    parser.add_argument('fragment_id', type=int)
+    parser.add_argument('fragment_length', type=int)
     parser.add_argument('fragment_run')
     parser.add_argument('--dry-run', action='store_true')
     parser.add_argument('--nobackup', action='store_true')
@@ -111,12 +111,11 @@ def main():
         matrix, 
         metrics=capture_metrics,
         #abort=False,
-        fragment_id=None,
-        fragment_length=None,
+        fragment_id=args.fragment_id,
+        fragment_length=args.fragment_length,
         fragment_run_start=start,
         fragment_run_end=end,
-        dry_run=args.dry_run,
-        workers=18
+        dry_run=args.dry_run
     )
 
 

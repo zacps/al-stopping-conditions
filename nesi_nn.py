@@ -5,8 +5,12 @@ Takes the following CLI arguments:
 
 """
 
+import os
 import argparse
 from dotenv import load_dotenv
+
+# Neural networks are big, so get written to the nobackup storage
+os.environ['OUT_DIR'] = "/home/zpul156/out_nobackup"
 
 from sklearn.metrics import accuracy_score, f1_score, roc_auc_score
 
@@ -63,7 +67,7 @@ capture_metrics = [
     roc_auc_score,
     "time",
     "time_total",
-    "time_ee",
+    #"time_ee",
     
     "uncertainty_average",
     "uncertainty_min",
@@ -76,11 +80,12 @@ capture_metrics = [
     "entropy_max",
     #"n_support",
     "contradictory_information",
-    "expected_error",
-    "expected_error_min",
-    "expected_error_max",
-    "expected_error_average",
-    "expected_error_variance",
+    # Expected error is slow, so we don't run it on neural networks
+    #"expected_error",
+    #"expected_error_min",
+    #"expected_error_max",
+    #"expected_error_average",
+    #"expected_error_variance",
 ]
 
 def main():
