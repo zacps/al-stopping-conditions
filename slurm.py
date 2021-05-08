@@ -13,6 +13,7 @@ parser.add_argument('fragment_run')
 parser.add_argument('--mem', default='612M')
 parser.add_argument('--time', default='0-00:02:00')
 parser.add_argument('--oneshot', action='store_true')
+parser.add_argument('--nobackup', action='store_true')
 
 args = parser.parse_args()
 
@@ -37,7 +38,7 @@ slurm = Slurm(
 job_id = slurm.sbatch(f"""
 module load Python/3.8.2-gimkl-2020a
 poetry run python checker.py ${{SLURM_JOB_ID}}
-poetry run python {args.notebook} {args.fragment_id} {args.fragment_length} {args.fragment_run}
+poetry run python {args.notebook} {args.fragment_id} {args.fragment_length} {args.fragment_run} {"--nobackup" if args.nobackup else ""}
 """)
 
 # ---------------------------------------------------------------------------------------------------
@@ -57,5 +58,5 @@ slurm = Slurm(
 # checker.py will check to see if the above job exited with timeout, and if it did schedule an identical jobs by calling this again.
 # then, this will happen recursively until there's a non-timeout exit code.
 slurm.sbatch(f"""
-poetry run python checker.py {job_id} {args.notebook} {args.job_name} {args.fragment_id} {args.fragment_length} {args.fragment_run} --mem={args.mem} --time={args.time}
+poetry run python checker.py {job_id} {args.notebook} {args.job_name} {args.fragment_id} {args.fragment_length} {args.fragment_run} {"--nobackup" if args.nobackup else ""} --mem={args.mem} --time={args.time}
 """)

@@ -18,6 +18,7 @@ parser.add_argument('fragment_length', type=int)
 parser.add_argument('fragment_run')
 parser.add_argument('--mem', default='612M')
 parser.add_argument('--time', default='0-00:02:00')
+parser.add_argument('--nobackup', action='store_true')
 
 
 args = parser.parse_args()
@@ -42,5 +43,8 @@ if state != 'TIMEOUT':
 	sys.exit(1)
 
 print('scheduling next job')
-subprocess.run(['poetry', 'run', 'python', 'slurm.py', args.notebook, args.job_name, str(args.fragment_id), str(args.fragment_length), args.fragment_run, f'--mem={args.mem}', f'--time={args.time}'])
+command = ['poetry', 'run', 'python', 'slurm.py', args.notebook, args.job_name, str(args.fragment_id), str(args.fragment_length), args.fragment_run, f'--mem={args.mem}', f'--time={args.time}']
+if args.nobackup:
+	command.append('--nobackup')
+subprocess.run(command)
 
