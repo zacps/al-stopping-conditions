@@ -117,7 +117,7 @@ matrix = {
         ("anuran", wrap(anuran, None)),
     ],
     "dataset_mutators": {
-        "unbalanced2-50": partial(unbalanced2, amount=5e-1)
+        "unbalanced2-70": partial(unbalanced2, amount=7e-1)
     },
     "methods": [
         ("uncertainty", partial(uncertainty_stop, n_instances=10)),
