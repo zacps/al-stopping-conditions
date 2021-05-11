@@ -7,6 +7,8 @@ nesi:
   random forest 2-5, 6-9
   labelled
     100 6-9
+  unbalanced
+    70 0-4 (skips one seed on one dataset)
 
 colossal:
   base 2-3, 4-5, 6-7, (8-9 excluding newsgroups)
@@ -21,11 +23,10 @@ colossal:
   unbalanced2-50 partial 0-1
 
 available to schedule:
+  newsgroups (w/o expected error)
   
 upcoming:
   bias
-    0-9
-  unbalanced
     0-9
   noise
     X% 2-9

@@ -50,7 +50,7 @@ from sklearn import metrics
 from sklearn.utils import check_random_state
 from sklearn.metrics import roc_auc_score, f1_score, cohen_kappa_score
 from sklearn.preprocessing import LabelEncoder
-from libactive import active_split
+from libactive import active_split, delete_from_csr
 from tabulate import tabulate
 from statsmodels.stats.inter_rater import fleiss_kappa
 from autorank import autorank, plot_stats
@@ -194,7 +194,7 @@ def SSNCut(x, classifiers, X_unlabelled, m=.2, affinity='linear', **kwargs):
             
     
 
-def SSNCut_values(classifiers, i, m=.2, affinity='linear', **kwargs):
+def SSNCut_values(classifiers, X_unlabelled, Y_oracle, m=.2, affinity='linear', **kwargs):
     """
     NOTES:
     * They used an RBF svm to match the RBF affinity measure for SpectralClustering
@@ -214,10 +214,10 @@ def SSNCut_values(classifiers, i, m=.2, affinity='linear', **kwargs):
         # Don't store all pools in memory, generator expression
         X_unlabelleds = (clf.X_unlabelled for clf in classifiers)
     else:
-        X_unlabelleds = reconstruct_unlabelled(classifiers, X_unlabelled)
+        X_unlabelleds = reconstruct_unlabelled(classifiers, X_unlabelled, Y_oracle)
         
     for i, (clf, X_unlabelled) in enumerate(zip(classifiers, X_unlabelleds)):
-        print(f"{i}/{len(classifiers)}")
+        #print(f"{i}/{len(classifiers)}")
         t0 = time.monotonic()
         # Note: With non-binary classification the value of the decision function is a transformation of the distance...
         order = np.argsort(np.abs(clf.estimator.decision_function(X_unlabelled)))
@@ -233,21 +233,20 @@ def SSNCut_values(classifiers, i, m=.2, affinity='linear', **kwargs):
         if diff > 0.5:
             diff = 1 - diff
         out.append(diff)
-        print(f"SSNCut took {time.monotonic()-t0}")
+        #print(f"SSNCut took {time.monotonic()-t0}")
             
     return out
 
 
-def reconstruct_unlabelled(clfs, X_unlabelled):
+def reconstruct_unlabelled(clfs, X_unlabelled, Y_oracle):
     """
     Reconstruct the unlabelled pool from stored information. We do not directly store the unlabelled pool,
     but we store enough information to reproduce it. This was used to compute stopping conditions implemented
     after some experiments had been started.
     """
-    import libdatasets
+    assert X_unlabelled.shape[0] == Y_oracle.shape[0], "unlabelled and oracle pools have a different shape"
     
-    
-    if not isinstance(X, scipy.sparse.csr_matrix):
+    if not isinstance(X_unlabelled, scipy.sparse.csr_matrix):
         # TODO: Currently broken (should be a generator for each classifier)
         # but there are no binary non-sparse datasets so *shrug*
         return X_unlabelled[(X_unlabelled[:,np.newaxis]!=clf.X_training).all(-1).any(-1)]
@@ -257,28 +256,38 @@ def reconstruct_unlabelled(clfs, X_unlabelled):
         "https://stackoverflow.com/questions/23124403/how-to-compare-2-sparse-matrix-stored-using-scikit-learn-library-load-svmlight-f"
         return np.where(np.isclose((np.array(A.multiply(A).sum(1)) +
             np.array(B.multiply(B).sum(1)).T) - 2 * A.dot(B.T).toarray(), 0))
-    
-    from libactive import delete_from_csr
 
     last_n = 0
     for clf in clfs:
+        assert X_unlabelled.shape[0] == Y_oracle.shape[0]
         t0 = time.monotonic()
-        equal_rows = compare(X_unlabelled, clf.X_training)
+        # make sure we're only checking for values from the 10 most recently added points
+        # otherwise we might think a duplicate is a new point and try to add it, making the
+        # count wrong!
+        equal_rows = list(compare(X_unlabelled, clf.X_training[-10:]))
+        equal_rows[1] = equal_rows[1] + (clf.X_training.shape[0]-10)
         # Some datasets (rcv1) contain duplicates. These were only queried once, so we make sure we only remove a single
         # copy from the unlabelled pool.
-        really_equal_rows = []
-        for clf_idx in np.unique(equal_rows[1]):
-            dupes = equal_rows[0][equal_rows[1]==clf_idx]
-            # some datasets have duplicates with differing labels (rcv1)
-            dupes_correct_label = dupes[Y_oracle[dupes]==clf.y_training[clf_idx]][0]
-            really_equal_rows.append(dupes_correct_label)
+        if len(equal_rows[0]) > 10:
+            really_equal_rows = []
+            for clf_idx in np.unique(equal_rows[1]):
+                dupes = equal_rows[0][equal_rows[1]==clf_idx]
+                # some datasets have duplicates with differing labels (rcv1)
+                dupes_correct_label = dupes[Y_oracle[dupes]==clf.y_training[clf_idx]][0]
+                really_equal_rows.append(dupes_correct_label)
+
+        else:
+            # Fast path with no duplicates
+            assert (Y_oracle[equal_rows[0]]==clf.y_training[equal_rows[1]]).all()
+            really_equal_rows = equal_rows[0]
             
-        
-        assert len(really_equal_rows) == last_n
-        last_n += 10
-        ret = delete_from_csr(X_unlabelled, really_equal_rows).copy()
-        print(f"reconstruct took {time.monotonic()-t0}")
-        yield ret
+        assert len(really_equal_rows) == last_n, f"{len(really_equal_rows)}=={last_n}"
+        last_n = 10
+        X_unlabelled = delete_from_csr(X_unlabelled, really_equal_rows)
+        Y_oracle = np.delete(Y_oracle, really_equal_rows, axis=0)
+        #print(f"reconstruct took {time.monotonic()-t0}")
+        # TODO: Check if copy is necessary
+        yield X_unlabelled.copy()
 
 
 def n_support(x, classifiers, n_support, **kwargs):
@@ -403,7 +412,7 @@ def acc(classifiers, metric=metrics.accuracy_score, nth=0):
             diffs.append(metric(clf.y_training[-size:], pclf.predict(clf.X_training[-size:])))
     return x, diffs
 
-def first_acc(classifiers, metric=metrics.accuracy_score):
+def first_acc(classifiers, metric=metrics.accuracy_score, **kwargs):
     """
     Calculate the accuracy of first classifier on current data.
     
