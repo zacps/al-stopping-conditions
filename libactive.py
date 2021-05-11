@@ -68,7 +68,7 @@ def active_split(X, Y, test_size=0.5, labeled_size=0.1, shuffle=True, ensure_y=F
     
     # ensure a label for all classes made it in to the initial train and validation sets
     for klass in unique:
-        if klass not in Y_labelled:
+        if not np.isin(klass, Y_labelled):
             # First value chosen is effectively constant random as the dataset is shuffled
             idx = np.where(Y_oracle==klass)[0][0]
             
@@ -98,7 +98,7 @@ def active_split(X, Y, test_size=0.5, labeled_size=0.1, shuffle=True, ensure_y=F
             X_labelled = np.concatenate((X_labelled, X_unlabelled[idx]), axis=0)
         Y_oracle = np.delete(Y_oracle, idx, axis=0)
         if isinstance(X_unlabelled, scipy.sparse.csr_matrix):
-            X_unlabelled = delete_from_csr(X_unlabelled, row_indices=[idx])
+            X_unlabelled = delete_from_csr(X_unlabelled, row_indices=idx)
         else:
             X_unlabelled = np.delete(X_unlabelled, idx, axis=0)
                     
