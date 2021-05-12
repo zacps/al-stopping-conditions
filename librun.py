@@ -25,8 +25,10 @@ from joblib import delayed
 from sklearn.metrics import accuracy_score, f1_score, roc_auc_score
 from sklearn import metrics as skmetrics
 from sklearn.utils import check_random_state
+from sklearn.svm import SVC
 from tabulate import tabulate
 
+import libdatasets
 from libutil import Metrics, average
 from libstop import first_acc, no_ahead_tvregdiff
 from libplot import align_yaxis
@@ -425,12 +427,20 @@ def plot_stop(plots, classifiers, stop_conditions, stop_results, scale='linear',
     for i, (fig, ax) in enumerate(figaxes):
         clfs = classifiers[i]
         metrics = plots[i][1]
+        
+        if plots[i][0].dataset_mutator_name != 'none':
+            scores = __get_passive_scores(plots[i][0], range(len(plots[i][1])))
+            for ax, score in zip(ax, scores):
+                ax.axhline(score, color='tab:gray', ls='--')
+            
         prop_cycle = plt.rcParams['axes.prop_cycle']
         colors = prop_cycle.by_key()['color']
 
         accs = [first_acc(clfs_)[1] for clfs_ in clfs]
         accx = first_acc(clfs[0])[0]
 
+        print([len(l) for l in accs]); raise Exception()
+        #print(accs); raise Exception()
         acc_median = np.median(accs, axis=0)
         acc_stderr = np.std(accs, axis=0)
         
@@ -463,6 +473,62 @@ def plot_stop(plots, classifiers, stop_conditions, stop_results, scale='linear',
 
         fig.legend()
         fig.tight_layout()
+        
+        
+def __get_passive_scores(conf, runs):
+    """
+    Get the performance scores that would be obtained by a passive classifier trained on all the
+    perfect data.
+    """
+    fname = f"{out_dir()}{os.path.sep}passive{os.path.sep}{conf.serialize()}.csv"
+    try:
+        with open(fname, "rb") as f:
+            results = pickle.load(f)
+            if all([run in last.keys() for run in runs]):
+                return [[np.min([result[i] for result in results]),np.mean([result[i] for result in results]),np.max([result[i] for result in results])] for i in range(3)]
+    except FileNotFoundError:
+        results = {}
+    
+    assert conf.model_name == 'svm-linear'
+    
+    X,y = getattr(libdatasets, conf.dataset_name)(None)
+    
+    for i in runs:
+        if i in results.keys():
+            continue
+        _, X_unlabelled, y_labelled, y_oracle, X_test, y_test = active_split(
+            X, y, labeled_size=conf.meta['labelled_size'], test_size=conf.meta['test_size'], random_state=check_random_state(i), ensure_y=conf.meta['ensure_y']
+
+        )
+        clf = SVC(probability=True, kernel='linear')
+        clf.fit(X_unlabelled, y_oracle)
+        predicted = clf.predict(X_test)
+        predict_proba = clf.predict_proba(X_test)
+        unique_labels = np.unique(y_labelled)
+
+        if len(unique_labels) > 2 or len(unique_labels.shape[0]) > 1:
+            roc_auc = roc_auc_score(
+                y_test, predict_proba, multi_class="ovr"
+            )
+        else:
+            roc_auc = roc_auc_score(
+                y_test, predict_proba[:, 1]
+        )
+    
+        results[i] = [
+            accuracy_score(y_test, predicted),
+            f1_score(
+                y_test,
+                predicted,
+                average="micro" if len(unique_labels) > 2 else "binary",
+                pos_label=unique_labels[1] if len(unique_labels) <= 2 else 1,
+            ),
+            roc_auc
+        ]
+        with open(fname, "wb") as f:
+            pickle.dump(f, results)
+        
+    return [[np.min([result[i] for result in results]),np.mean([result[i] for result in results]),np.max([result[i] for result in results])] for i in range(3)]
 
 
 def __write_result(config, result, runs):

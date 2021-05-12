@@ -132,3 +132,19 @@ def out_dir():
 
 def dataset_dir():
     return os.environ['DATASET_DIR']
+
+
+def get_mutator(name: str):
+    from nesi_bias import bias
+    
+    if name.startswith("noise"):
+        from nesi_noise import noise
+        amount = int(name[5:])*1e-2
+        return partial(noise, amount=amount)
+    if name.startswith("unbalanced2"):
+        from nesi_unbalanced import unbalanced2
+        amount = int(name.split('-')[1])*1e-2
+        return partial(unbalanced2, amount=amount)
+    if name.startswith("bias"):
+        raise Exception("bias mutator getting not implemented")
+    raise Exception(f"unknown mutator {name}")
