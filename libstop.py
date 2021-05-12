@@ -238,6 +238,19 @@ def SSNCut_values(classifiers, X_unlabelled, Y_oracle, m=.2, affinity='linear', 
     return out
 
 
+def fscore():
+    def tp():
+        pass
+    
+    def fp():
+        pass
+    
+    def fn():
+        pass
+    
+    return 2*tp()/(2*tp()+fp()+fn())
+
+
 def reconstruct_unlabelled(clfs, X_unlabelled, Y_oracle):
     """
     Reconstruct the unlabelled pool from stored information. We do not directly store the unlabelled pool,

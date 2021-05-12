@@ -12,6 +12,8 @@ nesi:
 
 colossal:
   base 2-3, 4-5, 6-7, (8-9 excluding newsgroups)
+    RENAMED 0-1 -> 2-3 AS A GUESS, THIS NEEDS TO BE VERIFIED
+    
   noise
     10% 0-1
     20% 0-1
