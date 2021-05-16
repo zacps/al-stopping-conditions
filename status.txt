@@ -1,5 +1,5 @@
 nesi:
-  base 0-1, 10-19
+  base 0-1, 10-19, 20-29
   neural net 0-1
     slow, only splice & swarm completed as of 26/04/2021
     2-9 without expected error
@@ -20,17 +20,26 @@ colossal:
     30% 0-1
     40% 0-1
   labelled
-    100 0-1, 2-3, 4-5
+    100 0-1, 2-3, 4-5 10-19
   random forest 0-1 
   unbalanced2-50 partial 0-1
 
 available to schedule:
   newsgroups (w/o expected error)
   
-upcoming:
   bias
-    0-9
+    0-9 10-19 20-29
+  
+upcoming:
+  labelled
+    100 20-29
+  random forest
+    10-19 20-29
+  decision tree
+    10-19 20-29
   noise
-    X% 2-9
+    X% 2-9 10-19 20-29
   extra dataset?
-    ALL 0-9, base 10-19
+    ALL 0-9 10-19 20-29
+  easy/hard dataset (svm-linear only)
+    0-9, 10-19, 20-29

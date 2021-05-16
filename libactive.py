@@ -596,7 +596,11 @@ class CompressedStore:
         else:
             mode = 'w'
         self.filename = filename
-        self.zip = zipfile.ZipFile(self.filename, mode, compression=zipfile.ZIP_DEFLATED)
+        try:
+            self.zip = zipfile.ZipFile(self.filename, mode, compression=zipfile.ZIP_DEFLATED)
+        except Exception as e:
+            print(f"Failed to open compressed store {filename}")
+            raise e
         self.i = len(self.zip.namelist())
         
     def append(self, obj):
