@@ -637,6 +637,7 @@ def eval_stopping_conditions(results_plots, classifiers, conditions=None):
             unlabelled_pools = [None] * len(clfs)
         
         for (name, cond) in conditions.items():
+            # TODO: Parallelize
             stop_results[conf.dataset_name][name] = [cond(**metric, classifiers=clfs_, config=conf, X_unlabelled=X_unlabelled) for clfs_, metric, X_unlabelled in zip(clfs, metrics, unlabelled_pools)]
             
     return (conditions, stop_results)

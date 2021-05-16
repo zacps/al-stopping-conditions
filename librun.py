@@ -428,6 +428,10 @@ def plot_stop(plots, classifiers, stop_conditions, stop_results, scale='linear',
         clfs = classifiers[i]
         metrics = plots[i][1]
         
+        for j, clfs_ in enumerate(clfs):
+            if len(clfs_) != 100:
+                raise Exception(f'short classifier file: {plots[i][0].serialize()}_{j}.zip\nIt has length {len(clfs_)} when it should have length 100')
+        
         if plots[i][0].dataset_mutator_name != 'none':
             scores = __get_passive_scores(plots[i][0], range(len(plots[i][1])))
             for ax, score in zip(ax, scores):
@@ -438,9 +442,7 @@ def plot_stop(plots, classifiers, stop_conditions, stop_results, scale='linear',
 
         accs = [first_acc(clfs_)[1] for clfs_ in clfs]
         accx = first_acc(clfs[0])[0]
-
-        print([len(l) for l in accs]); raise Exception()
-        #print(accs); raise Exception()
+                
         acc_median = np.median(accs, axis=0)
         acc_stderr = np.std(accs, axis=0)
         

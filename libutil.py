@@ -9,6 +9,13 @@ from art.metrics import empirical_robustness
 from art.estimators.classification.scikitlearn import ScikitlearnSVC
 
 
+COLORS = ["#56ad94",
+"#8f56cf",
+"#365300",
+"#a96aa5",
+"#bf6148"]
+
+
 class ProgressParallel(Parallel):
     def __init__(
         self, use_tqdm=True, total=None, desc=None, leave=True, *args, **kwargs

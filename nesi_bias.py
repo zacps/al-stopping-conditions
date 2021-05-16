@@ -17,28 +17,27 @@ from libadversarial import uncertainty_stop
 from libactive import delete_from_csr
 
 
-def bias(X_train, X_test, y_train, y_test, amount=1e-1, direction=operator.le, rand=None, config_str=None, i=None, **kwargs):
+def bias(X_train, X_test, y_train, y_test, amount=1e-1, rand=None, config_str=None, i=None, **kwargs):
     """
     Bias data. Find the second most predictive attribute and reduce the prevalence of values above the
     mean for the attribute to amount %. Then, remove the attribute from the test and train data.
     
     This is supposed to simulate the data being biased by an unknown feature.
     """
-    tree = DecisionTreeClassifier()
+    tree = DecisionTreeClassifier(max_depth=1)
     tree.fit(X_train[:1000], y_train[:1000])
-    second_most_predictive = np.argsort(tree.feature_importances_)[-2]
-    mean = np.median(X_train[:,second_most_predictive])
+    classes = tree.predict(X_train)
+    u_classes = np.unique(classes, return_counts=True)
     
-    above_idx = np.squeeze(np.argwhere(X_train[:,second_most_predictive]>mean))
-    
+    above_idx = np.where(classes==u_classes[0][np.argmax(u_classes[1])])[0]
     above_idx = rand.choice(above_idx, int(above_idx.shape[0]*amount), replace=False)
-    below_idx = direction(X_train[:,second_most_predictive], mean)
+    below_idx = np.where(classes!=u_classes[0][np.argmax(u_classes[1])])[0]
     
     X_train = X_train[np.concatenate((above_idx, below_idx))]
     y_train = y_train[np.concatenate((above_idx, below_idx))]
     
-    X_train = np.delete(X_train, second_most_predictive, axis=1)
-    X_test = np.delete(X_test, second_most_predictive, axis=1)
+    #X_train = np.delete(X_train, second_most_predictive, axis=1)
+    #X_test = np.delete(X_test, second_most_predictive, axis=1)
     
     # TODO: Shuffle!
     
@@ -52,20 +51,20 @@ matrix = {
     # Dataset fetchers should cache if possible
     # Lambda wrapper required for function to be pickleable (sent to other threads via joblib)
     "datasets": [
-        ("newsgroups", wrap(newsgroups, None)),
+        #("newsgroups", wrap(newsgroups, None)),
         ("rcv1", wrap(rcv1, None)),
-        ("webkb", wrap(webkb, None)),
-        ("spamassassin", wrap(spamassassin, None)),
+        #("webkb", wrap(webkb, None)),
+        #("spamassassin", wrap(spamassassin, None)),
         ("avila", wrap(avila, None)),
-        ("smartphone", wrap(smartphone, None)),
+        #("smartphone", wrap(smartphone, None)),
         ("swarm", wrap(swarm, None)),
         ("sensorless", wrap(sensorless, None)),
-        ("splice", wrap(splice, None)),
+        #("splice", wrap(splice, None)),
         ("anuran", wrap(anuran, None)),
         
     ],
     "dataset_mutators": {
-        "bias10": partial(bias, amount=1e-1)
+        "bias2-10": partial(bias, amount=1e-1)
     },
     "methods": [
         ("uncertainty", partial(uncertainty_stop, n_instances=10)),
