@@ -198,7 +198,7 @@ def run(
             )
         except ConnectionError as con_err:
             print(f"Couldn't send failed notification because: {con_err}")
-
+            
     return results
 
 
@@ -429,7 +429,7 @@ def plot_stop(plots, classifiers, stop_conditions, stop_results, scale='linear',
         metrics = plots[i][1]
         
         for j, clfs_ in enumerate(clfs):
-            if len(clfs_) != 100:
+            if len(clfs_) < 100:
                 raise Exception(f'short classifier file: {plots[i][0].serialize()}_{j}.zip\nIt has length {len(clfs_)} when it should have length 100')
         
         if plots[i][0].dataset_mutator_name != 'none':
@@ -470,8 +470,10 @@ def plot_stop(plots, classifiers, stop_conditions, stop_results, scale='linear',
         for ii, a in enumerate(ax):        
             for iii, (name, cond) in enumerate(stop_conditions.items()):
                 stops = stop_results[plots[i][0].dataset_name][name]
-                for iiii, stop in enumerate(stops[:1]):
-                    a.axvline(stop, label=name if ii == 0 and iiii ==0 else None, color=colors[(iii+1) % len(colors)])
+                for iiii, stop in enumerate(stops):
+                    if stop is not None:
+                        a.axvline(stop, label=name if ii == 0 and iiii ==0 else None, color=colors[(iii+1) % len(colors)])
+                        break
 
         fig.legend()
         fig.tight_layout()
@@ -570,6 +572,8 @@ def __read_result(file, config, runs=None):
             with open(name, "r") as f:
                 cached_config = Config(**{"model_name": "svm-linear", **json.loads(f.readline())})
                 results.append(pd.read_csv(f, index_col=0))
+        # make the run numbers available
+        cached_config.runs = runs
         return cached_config, results
 
 

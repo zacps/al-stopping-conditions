@@ -596,6 +596,7 @@ class CompressedStore:
         else:
             mode = 'w'
         self.filename = filename
+        self.mode = mode
         try:
             self.zip = zipfile.ZipFile(self.filename, mode, compression=zipfile.ZIP_DEFLATED)
         except Exception as e:
@@ -642,6 +643,18 @@ class CompressedStore:
         
     def close(self):
         self.zip.close()
+        
+        
+    def __getstate__(self):
+        if hasattr(self, 'zip'):
+            odict = self.__dict__.copy()
+            del odict['zip']
+        return odict
+        
+    def __setstate__(self, d):
+        self.__dict__ = d
+        self.zip = zipfile.ZipFile(self.filename, 'r' if self.mode == 'r' else 'a', compression=zipfile.ZIP_DEFLATED)
+        self.i = len(self.zip.namelist())
     
     
 class BeamClf:

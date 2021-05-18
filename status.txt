@@ -9,6 +9,8 @@ nesi:
     100 6-9
   unbalanced
     70 0-4 (skips one seed on one dataset)
+  easy/hard dataset (svm-linear only)
+    0-9
 
 colossal:
   base 2-3, 4-5, 6-7, (8-9 excluding newsgroups)
@@ -21,8 +23,9 @@ colossal:
     40% 0-1
   labelled
     100 0-1, 2-3, 4-5 10-19
+     -> 0-5 need to be rerun as they are short (at least for rcv1)
   random forest 0-1 
-  unbalanced2-50 partial 0-1
+  ~~unbalanced2-50 partial 0-1~~
 
 available to schedule:
   newsgroups (w/o expected error)
@@ -41,5 +44,5 @@ upcoming:
     X% 2-9 10-19 20-29
   extra dataset?
     ALL 0-9 10-19 20-29
-  easy/hard dataset (svm-linear only)
-    0-9, 10-19, 20-29
+  easy/hard datset (svm-linear only)
+    10-19, 20-29

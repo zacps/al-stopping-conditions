@@ -40,8 +40,12 @@ Which take a threshold and a number of iterations for which the value should be 
 
 import time
 import itertools
+import os
+import dill
 from functools import partial
+import operator
 
+from joblib import Parallel, delayed
 import numpy as np
 import pandas as pd
 import scipy
@@ -57,6 +61,12 @@ from autorank import autorank, plot_stats
 from tvregdiff.tvregdiff import TVRegDiff
 
 import libdatasets
+from libutil import out_dir
+
+
+class FailedToTerminate(Exception):
+    def __init__(self, method):
+        super().__init__(f"{method} failed to determine a stopping location")
 
 
 def optimal_ub(x, accuracy_score, f1_score, roc_auc_score, **kwargs):
@@ -96,7 +106,7 @@ def SC_entropy_mcs(x, entropy_max, threshold=0.01, **kwargs):
     https://www.aclweb.org/anthology/I08-1048.pdf
     """
     if not (entropy_max<=threshold).any():
-        return x.iloc[-1]
+        raise FailedToTerminate('SC_entropy_mcs')
     return x.iloc[np.argmax(entropy_max<=threshold)]
 
 
@@ -109,7 +119,10 @@ def SC_oracle_acc_mcs(x, classifiers, threshold=0.9, **kwargs):
     """
 
     accx, acc_ = acc(classifiers, nth='last')
-    return accx[np.argmax(np.array(acc_)[1:] >= threshold)+1]
+    try:
+        return accx[np.argmax(np.array(acc_)[1:] >= threshold)+1]
+    except IndexError:
+        raise FailedToTerminate('SC_oracle_acc_mcs')
 
 
 def SC_mes(x, expected_error_min, threshold=1e-2, **kwargs):
@@ -120,7 +133,10 @@ def SC_mes(x, expected_error_min, threshold=1e-2, **kwargs):
     https://www.aclweb.org/anthology/I08-1048.pdf
     """
     
-    return x.iloc[np.argmax(expected_error_min <= threshold) or -1]
+    try:
+        return x.iloc[np.argmax(expected_error_min <= threshold)]
+    except IndexError:
+        raise FailedToTerminate('SC_mes')
 
 
 def ZPS_ee(x, expected_error_min, threshold=5e-2, **kwargs):
@@ -173,7 +189,7 @@ def EVM(x, uncertainty_variance, uncertainty_variance_selected, selected=True, n
         if value < last-m:
             current += 1
         last = value
-    return x.iloc[-1]
+    raise FailedToTerminate('EVM')
 
 
 def SSNCut(x, classifiers, X_unlabelled, m=.2, affinity='linear', **kwargs):
@@ -192,6 +208,7 @@ def SSNCut(x, classifiers, X_unlabelled, m=.2, affinity='linear', **kwargs):
         if x0 == 10:
             return x.iloc[i-10] # return to the point of lowest value
             
+    raise FailedToTerminate('SSNCut')
     
 
 def SSNCut_values(classifiers, X_unlabelled, Y_oracle, m=.2, affinity='linear', **kwargs):
@@ -238,17 +255,60 @@ def SSNCut_values(classifiers, X_unlabelled, Y_oracle, m=.2, affinity='linear', 
     return out
 
 
-def fscore():
-    def tp():
-        pass
-    
-    def fp():
-        pass
-    
-    def fn():
-        pass
-    
-    return 2*tp()/(2*tp()+fp()+fn())
+def fscore_stop(x, classifiers, X_unlabelled, Y_oracle):
+    """
+    'Performance convergence' using TVDiff gradient estimation
+    https://www.aclweb.org/anthology/C08-1059
+    """
+    values = list(fscore(classifiers, X_unlabelled, Y_oracle))
+    grad = no_ahead_tvregdiff(values, 1, 1e-1, plotflag=False, diagflag=False)
+    return x.iloc[2+np.argmax(grad[2:] < 0)]
+
+
+
+def performance_convergence(x, classifiers, X_unlabelled, Y_oracle, threshold=5e-5, k=10, average=np.mean):
+    # We use k=10 instead of 100 because batch size is 10 for us, 1 for them
+    # multiple thresholds tested by authors (1e-2, 5e-5)
+    perf = list(fscore(classifiers, X_unlabelled, Y_oracle))
+    windows = np.lib.stride_tricks.sliding_window_view(perf, k)
+    for i in range(1, len(windows)):
+        w2 = average(windows[i])
+        w1 = average(windows[i-1])
+        g = w2 - w1
+        if windows[i][-1] > np.max(perf[:i+k]) and g > 0 and g < threshold:
+            return x.iloc[i+k]
+        
+    raise FailedToTerminate('performance_convergence')
+
+
+def fscore(classifiers, X_unlabelled, Y_oracle, **kwargs):
+    """
+    https://www.aclweb.org/anthology/C08-1059
+    """
+    if hasattr(classifiers[0], 'X_unlabelled'):
+        # Don't store all pools in memory, generator expression
+        X_unlabelleds = (clf.X_unlabelled for clf in classifiers)
+    else:
+        print("Reconstructing unlabelled pool")
+        X_unlabelleds = reconstruct_unlabelled(classifiers, X_unlabelled, Y_oracle)
+
+    for clf, X_unlabelled in zip(classifiers, X_unlabelleds):
+        print("X_unlabelled shape", X_unlabelled.shape)
+        X_subsampled = X_unlabelled[np.random.choice(X_unlabelled.shape[0], min(X_unlabelled.shape[0], 1000), replace=False)]
+        print("X_subsampled shape", X_subsampled.shape)
+        predictions = clf.predict_proba(X_subsampled)
+        print("predictions shape", predictions.shape)
+        def tp():
+            return np.sum(np.max(predictions, axis=1))
+
+        def fp():
+            return np.sum(np.max(1 - predictions, axis=1))
+
+        def fn():
+            m_predictions = predictions.copy()[np.argmax(predictions, axis=1)] = 0
+            return np.sum(m_predictions)
+
+        yield 2*tp()/(2*tp()+fp()+fn())
 
 
 def reconstruct_unlabelled(clfs, X_unlabelled, Y_oracle):
@@ -260,9 +320,8 @@ def reconstruct_unlabelled(clfs, X_unlabelled, Y_oracle):
     assert X_unlabelled.shape[0] == Y_oracle.shape[0], "unlabelled and oracle pools have a different shape"
     
     if not isinstance(X_unlabelled, scipy.sparse.csr_matrix):
-        # TODO: Currently broken (should be a generator for each classifier)
-        # but there are no binary non-sparse datasets so *shrug*
-        return X_unlabelled[(X_unlabelled[:,np.newaxis]!=clf.X_training).all(-1).any(-1)]
+        for clf in clfs:
+            yield X_unlabelled[(X_unlabelled[:,np.newaxis]!=clf.X_training).all(-1).any(-1)]
     
     # Fast row-wise compare function
     def compare(A, B):
@@ -333,7 +392,7 @@ def stabilizing_predictions(x, classifiers, X_unlabelled, k=3, threshold=0.99, *
     """
     metric = kappa_metric(x, classifiers, X_unlabelled, k=k)
     if not (metric >=threshold).any():
-        return x.iloc[-1]
+        raise FailedToTerminate('stabilizing_predictions')
     return x[np.argmax(metric>=threshold)]
 
 
@@ -371,9 +430,15 @@ def ZPS(classifiers, order=1, safety_factor=1.0, **kwargs):
     
     if order == 2:
         second = np.array([np.nan, np.nan, *no_ahead_tvregdiff(grad[2:], 1, 1e-1, plotflag=False, diagflag=False)])
-        return accx[int((np.argmax((grad[start:] >= 0) & (second[start:] >= 0)) + start)*safety_factor)]
+        try:
+            return accx[int((np.argmax((grad[start:] >= 0) & (second[start:] >= 0)) + start)*safety_factor)]
+        except IndexError:
+            raise FailedToTerminate('ZPS')
     
-    return accx[int((np.argmax(grad[start:] >= 0)+start)*safety_factor)]
+    try:
+        return accx[int((np.argmax(grad[start:] >= 0)+start)*safety_factor)]
+    except IndexError:
+        raise FailedToTerminate('ZPS')
 
 
 # ----------------------------------------------------------------------------------------------
@@ -618,29 +683,76 @@ def eval_stopping_conditions(results_plots, classifiers, conditions=None):
             "ZPS2": partial(ZPS, order=2),
             #"SSNCut": SSNCut
         }
-    
 
     stop_results = {}
+    
+    def eval_cond(name, conf, cond, j, **kwargs):
+        print(f"exec_cond Execing {name} on {conf.dataset_name}")
+        if name in stop_results[conf.dataset_name] and len(stop_results[conf.dataset_name][name]) > j:
+            return stop_results[conf.dataset_name][name][j]
+        try:
+            return cond(**kwargs)
+        except FailedToTerminate:
+            print(f'{name} failed to terminate on {conf.dataset_name} run {j}')
+            return None
+    
     for (clfs, (conf, metrics)) in zip(classifiers, results_plots):
-        stop_results[conf.dataset_name] = {}
+        stop_results[conf.dataset_name] = __read_stopping(conf.serialize())
         
         if 'stabilizing_predictions' in conditions.keys() or 'SSNCut' in conditions.keys():
             X, y = getattr(libdatasets, conf.dataset_name)(None)
-            unlabelled_pools = []
-            # WARN: This is not the same as the job numbers! Unfortunately they're not easily accessible
-            for i in range(len(clfs)):
-                _, X_unlabelled, _, _, _, _ = active_split(
-                    X, y, labeled_size=conf.meta['labelled_size'], test_size=conf.meta['test_size'], random_state=check_random_state(i), ensure_y=conf.meta['ensure_y']
-                )
-                unlabelled_pools.append(X_unlabelled)
+                        
+            def pools(X, y, conf, runs):
+                for i in runs:
+                    _, X_unlabelled, _, y_oracle, _, _ = active_split(
+                        X, y, labeled_size=conf.meta['labelled_size'], test_size=conf.meta['test_size'], random_state=check_random_state(i), ensure_y=conf.meta['ensure_y']
+                    )
+                    yield (X_unlabelled, y_oracle)
+
+            it1, it2 = itertools.tee(pools(X, y, conf, conf.runs))
+            unlabelled_pools = map(operator.itemgetter(0), it1)
+            y_oracles = map(operator.itemgetter(1), it2)
+
         else:
-            unlabelled_pools = [None] * len(clfs)
+            unlabelled_pools = [None] * len(clfs); y_oracles = [None] * len(clfs)
         
-        for (name, cond) in conditions.items():
-            # TODO: Parallelize
-            stop_results[conf.dataset_name][name] = [cond(**metric, classifiers=clfs_, config=conf, X_unlabelled=X_unlabelled) for clfs_, metric, X_unlabelled in zip(clfs, metrics, unlabelled_pools)]
+        # todo: split this into chunks for memory usage reasons
+        results = np.array(Parallel(n_jobs=os.cpu_count())(
+            delayed(eval_cond)(
+                name, 
+                conf, 
+                cond,
+                j,
+                **metric,
+                classifiers=clfs_,
+                config=conf,
+                X_unlabelled=X_unlabelled,
+                Y_oracle=y_oracle,
+            ) for j, (clfs_, metric, X_unlabelled, y_oracle) in enumerate(zip(clfs, metrics, unlabelled_pools, y_oracles))
+              for (name, cond) in conditions.items()
+              
+        )).reshape(len(metrics), len(conditions))
+        
+        for i in range(len(conditions)):
+            stop_results[conf.dataset_name][list(conditions.keys())[i]] = results[:,i]
+        __write_stopping(conf.serialize(), stop_results[conf.dataset_name])
             
     return (conditions, stop_results)
+
+
+def __read_stopping(config_str):
+    file = f"{out_dir()}/stopping/{config_str}.pickle"
+    try:
+        with open(file, "rb") as f:
+            return dill.load(f)
+    except FileNotFoundError:
+        return {}
+
+
+def __write_stopping(config_str, data):
+    file = f"{out_dir()}/stopping/{config_str}.pickle"
+    with open(file, "wb") as f:
+        return dill.dump(data, f)
 
 
 # ----------------------------------------------------------------------------------------------
@@ -723,6 +835,9 @@ def rank_stop_conds(stop_results, results_plots, metric, title=None, holistic_x=
             if i == 0:
                 data.append([])
             for iii, run in enumerate(stop_results[dataset][method]):
+                if run is None:
+                    # TODO: Decide what to do with missing observations
+                    data[ii].append(None)
                 if metric == "instances":
                     data[ii].append(run)
                 elif metric == "holistic":
@@ -731,6 +846,7 @@ def rank_stop_conds(stop_results, results_plots, metric, title=None, holistic_x=
                     )
                 else:
                     data[ii].append(results_plots[i][1][iii][metric][results_plots[i][1][iii].x==run].iloc[0])
+    print(data)
     data = pd.DataFrame(np.array(data).T, columns=list(stop_results[list(stop_results.keys())[0]].keys()))
 
     autoranked = autorank(data, order='ascending' if metric == 'instances' else 'descending')
