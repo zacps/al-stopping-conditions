@@ -329,8 +329,8 @@ def reconstruct_unlabelled(clfs, X_unlabelled, Y_oracle):
         return np.where(np.isclose((np.array(A.multiply(A).sum(1)) +
             np.array(B.multiply(B).sum(1)).T) - 2 * A.dot(B.T).toarray(), 0))
 
-    last_n = 0
-    for clf in clfs:
+    yield X_unlabelled.copy()
+    for clf in clfs1[1:]:
         assert X_unlabelled.shape[0] == Y_oracle.shape[0]
         t0 = time.monotonic()
         # make sure we're only checking for values from the 10 most recently added points
@@ -353,8 +353,7 @@ def reconstruct_unlabelled(clfs, X_unlabelled, Y_oracle):
             assert (Y_oracle[equal_rows[0]]==clf.y_training[equal_rows[1]]).all()
             really_equal_rows = equal_rows[0]
             
-        assert len(really_equal_rows) == last_n, f"{len(really_equal_rows)}=={last_n}"
-        last_n = 10
+        assert len(really_equal_rows) == 10, f"{len(really_equal_rows)}=={last_n}"
         X_unlabelled = delete_from_csr(X_unlabelled, really_equal_rows)
         Y_oracle = np.delete(Y_oracle, really_equal_rows, axis=0)
         #print(f"reconstruct took {time.monotonic()-t0}")
@@ -681,7 +680,7 @@ def eval_stopping_conditions(results_plots, classifiers, conditions=None):
                 stabilizing_predictions
             ]},
             "ZPS2": partial(ZPS, order=2),
-            "SSNCut": SSNCut
+            #"SSNCut": SSNCut
         }
 
     stop_results = {}
@@ -694,6 +693,9 @@ def eval_stopping_conditions(results_plots, classifiers, conditions=None):
             return cond(**kwargs)
         except FailedToTerminate:
             print(f'{name} failed to terminate on {conf.dataset_name} run {j}')
+            return None
+        except Exception as e:
+            print(f'WARNING {name} failed on {conf.dataset_name} run {j} with exception: {e}')
             return None
     
     for (clfs, (conf, metrics)) in zip(classifiers, results_plots):
@@ -848,7 +850,7 @@ def rank_stop_conds(stop_results, results_plots, metric, title=None, holistic_x=
                     data[ii].append(x)
                 elif metric == "holistic":
                     data[ii].append(
-                        (accuracy+roc_auc/2*holistic_x*100-x
+                        (accuracy+roc_auc)/2*holistic_x*100-x
                     )
                 else:
                     metrics = {'accuracy_score': 0, 'f1_score': 1, 'roc_auc_score': 2}
