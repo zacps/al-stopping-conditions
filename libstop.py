@@ -192,10 +192,10 @@ def EVM(x, uncertainty_variance, uncertainty_variance_selected, selected=True, n
     raise FailedToTerminate('EVM')
 
 
-def SSNCut(x, classifiers, X_unlabelled, m=.2, affinity='linear', **kwargs):
+def SSNCut(x, classifiers, X_unlabelled, Y_oracle, m=.2, affinity='linear', **kwargs):
     if len(np.unique(classifiers[0].y_training)) > 2:
         return x.iloc[-1]
-    values = SSNCut_values(classifiers, X_unlabelled, m=.2, affinity='linear')
+    values = SSNCut_values(classifiers, X_unlabelled, Y_oracle, m=.2, affinity='linear')
     
     smallest = np.infty
     x0 = 0
@@ -677,17 +677,17 @@ def eval_stopping_conditions(results_plots, classifiers, conditions=None):
                 SC_oracle_acc_mcs, 
                 SC_mes,
                 EVM, 
-                ZPS_ee_grad, 
+                #ZPS_ee_grad, 
                 stabilizing_predictions
             ]},
             "ZPS2": partial(ZPS, order=2),
-            #"SSNCut": SSNCut
+            "SSNCut": SSNCut
         }
 
     stop_results = {}
     
     def eval_cond(name, conf, cond, j, **kwargs):
-        print(f"exec_cond Execing {name} on {conf.dataset_name}")
+        #print(f"exec_cond Execing {name} on {conf.dataset_name}")
         if name in stop_results[conf.dataset_name] and len(stop_results[conf.dataset_name][name]) > j:
             return stop_results[conf.dataset_name][name][j]
         try:
@@ -717,7 +717,8 @@ def eval_stopping_conditions(results_plots, classifiers, conditions=None):
             unlabelled_pools = [None] * len(clfs); y_oracles = [None] * len(clfs)
         
         # todo: split this into chunks for memory usage reasons
-        results = np.array(Parallel(n_jobs=os.cpu_count())(
+        # FIXME: Parallelize
+        results = np.array(Parallel(n_jobs=1)(
             delayed(eval_cond)(
                 name, 
                 conf, 
@@ -734,7 +735,12 @@ def eval_stopping_conditions(results_plots, classifiers, conditions=None):
         )).reshape(len(metrics), len(conditions))
         
         for i in range(len(conditions)):
-            stop_results[conf.dataset_name][list(conditions.keys())[i]] = results[:,i]
+            stop_results[conf.dataset_name][list(conditions.keys())[i]] = [(
+                x if list(conditions.keys())[i] != 'SSNCut' else x+10, 
+                metrics[j]['accuracy_score'][metrics[j].x==x].iloc[0] if x is not None else None, 
+                metrics[j]['f1_score'][metrics[j].x==x].iloc[0] if x is not None else None, 
+                metrics[j]['roc_auc_score'][metrics[j].x==x].iloc[0] if x is not None else None
+            ) for j, x in enumerate(results[:,i])]
         __write_stopping(conf.serialize(), stop_results[conf.dataset_name])
             
     return (conditions, stop_results)
@@ -834,18 +840,19 @@ def rank_stop_conds(stop_results, results_plots, metric, title=None, holistic_x=
         for ii, method in enumerate(stop_results[dataset].keys()):
             if i == 0:
                 data.append([])
-            for iii, run in enumerate(stop_results[dataset][method]):
-                if run is None:
+            for iii, (x, accuracy, f1, roc_auc) in enumerate(stop_results[dataset][method]):
+                if x is None:
                     # TODO: Decide what to do with missing observations
                     data[ii].append(None)
                 if metric == "instances":
-                    data[ii].append(run)
+                    data[ii].append(x)
                 elif metric == "holistic":
                     data[ii].append(
-                        (results_plots[i][1][iii].accuracy_score[results_plots[i][1][iii].x==run].iloc[0]+results_plots[i][1][iii].roc_auc_score[results_plots[i][1][iii].x==run].iloc[0])/2*holistic_x*100-run
+                        (accuracy+roc_auc/2*holistic_x*100-x
                     )
                 else:
-                    data[ii].append(results_plots[i][1][iii][metric][results_plots[i][1][iii].x==run].iloc[0])
+                    metrics = {'accuracy_score': 0, 'f1_score': 1, 'roc_auc_score': 2}
+                    data[ii].append((accuracy, f1, roc_auc)[metrics[metric]])
     print(data)
     data = pd.DataFrame(np.array(data).T, columns=list(stop_results[list(stop_results.keys())[0]].keys()))
 
