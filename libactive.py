@@ -433,8 +433,8 @@ class MyActiveLearner:
             
             if self.ret_classifiers and len(classifiers) == 0:
                 # Store the unlabelled pool with the classifier
-                self.learner.y_unlabelled = self.Y_oracle
-                self.learner.X_unlabelled = self.X_unlabelled
+                #self.learner.y_unlabelled = self.Y_oracle
+                #self.learner.X_unlabelled = self.X_unlabelled
                 classifiers.append(deepcopy(self.learner))
             
             # Do the active learning!
@@ -523,8 +523,8 @@ class MyActiveLearner:
         )
 
         if self.ret_classifiers:
-            self.learner.y_unlabelled = self.Y_oracle
-            self.learner.X_unlabelled = self.X_unlabelled
+            #self.learner.y_unlabelled = self.Y_oracle
+            #self.learner.X_unlabelled = self.X_unlabelled
             classifiers.append(self.learner)
 
         self._checkpoint(self)
