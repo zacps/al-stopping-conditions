@@ -9,15 +9,15 @@ matrix = {
     # Dataset fetchers should cache if possible
     # Lambda wrapper required for function to be pickleable (sent to other threads via joblib)
     "datasets": [
-        #("rcv1", wrap(rcv1, None)),
-        #("webkb", wrap(webkb, None)),
-        #("spamassassin", wrap(spamassassin, None)),
-        #("avila", wrap(avila, None)),
+        ("rcv1", wrap(rcv1, None)),
+        ("webkb", wrap(webkb, None)),
+        ("spamassassin", wrap(spamassassin, None)),
+        ("avila", wrap(avila, None)),
         ("smartphone", wrap(smartphone, None)),
-        #("swarm", wrap(swarm, None)),
-        #("sensorless", wrap(sensorless, None)),
-        #("splice", wrap(splice, None)),
-        #("anuran", wrap(anuran, None)),
+        ("swarm", wrap(swarm, None)),
+        ("sensorless", wrap(sensorless, None)),
+        ("splice", wrap(splice, None)),
+        ("anuran", wrap(anuran, None)),
     ],
     "dataset_mutators": {
         "none": (lambda *x, **kwargs: x),
@@ -26,7 +26,9 @@ matrix = {
         ("uncertainty", partial(uncertainty_stop, n_instances=10)),
     ],
     "models": [
-        "svm-linear"
+        "svm-linear",
+        "decision-tree",
+        "random-forest",
     ],
     "meta": {
         "dataset_size": 1000,
@@ -51,5 +53,23 @@ for plots, clfs in zip(results_plots, classifiers):
     for i, clfs_ in enumerate(clfs):
         if len(clfs_) != 100:
             raise Exception(f"{plots[0].serialize()}_{i}.zip")
+            
+params = {
+    "kappa": {"k": 2}
+}
+conditions = {
+    **{f"{f.__name__}": partial(f, **params.get(f.__name__, {})) for f in [
+        uncertainty_min, 
+        SC_entropy_mcs, 
+        SC_oracle_acc_mcs, 
+        SC_mes,
+        EVM, 
+        #ZPS_ee_grad, 
+        stabilizing_predictions
+    ]},
+    "ZPS2": partial(ZPS, order=2),
+    "SSNCut": SSNCut
+}
 
-stop_conditions, stop_results = libstop.eval_stopping_conditions(results_plots, classifiers)
+            
+stop_conditions, stop_results = libstop.eval_stopping_conditions(results_plots, classifiers, conditions=conditions)
