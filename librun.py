@@ -471,8 +471,9 @@ def plot_stop(plots, classifiers, stop_conditions, stop_results, scale='linear',
             for iii, (name, cond) in enumerate(stop_conditions.items()):
                 stops = stop_results[plots[i][0].dataset_name][name]
                 for iiii, stop in enumerate(stops):
-                    if stop is not None:
-                        a.axvline(stop, label=name if ii == 0 and iiii ==0 else None, color=colors[(iii+1) % len(colors)])
+                    if stop[0] is not None:
+                        #print(stop)
+                        a.axvline(stop[0], label=name if ii == 0 and iiii ==0 else None, color=colors[(iii+1) % len(colors)])
                         break
 
         fig.legend()

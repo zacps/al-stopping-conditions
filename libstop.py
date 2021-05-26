@@ -330,7 +330,7 @@ def reconstruct_unlabelled(clfs, X_unlabelled, Y_oracle):
             np.array(B.multiply(B).sum(1)).T) - 2 * A.dot(B.T).toarray(), 0))
 
     yield X_unlabelled.copy()
-    for clf in clfs1[1:]:
+    for clf in clfs[1:]:
         assert X_unlabelled.shape[0] == Y_oracle.shape[0]
         t0 = time.monotonic()
         # make sure we're only checking for values from the 10 most recently added points
@@ -688,7 +688,7 @@ def eval_stopping_conditions(results_plots, classifiers, conditions=None):
     def eval_cond(name, conf, cond, j, **kwargs):
         #print(f"exec_cond Execing {name} on {conf.dataset_name}")
         if name in stop_results[conf.dataset_name] and len(stop_results[conf.dataset_name][name]) > j:
-            return stop_results[conf.dataset_name][name][j]
+            return stop_results[conf.dataset_name][name][j][0]
         try:
             return cond(**kwargs)
         except FailedToTerminate:
@@ -835,31 +835,47 @@ def in_bounds(stop_results):
         tablefmt='fancy_grid'
     ))
     
-def rank_stop_conds(stop_results, results_plots, metric, title=None, holistic_x=50):
+def rank_stop_conds(stop_results, results_plots, metric, ax=None, title=None, average=False, passive=False, holistic_x=50):
     data = []
     # n instances data
     for i, dataset in enumerate(stop_results.keys()):
         for ii, method in enumerate(stop_results[dataset].keys()):
             if i == 0:
                 data.append([])
+            values = []
             for iii, (x, accuracy, f1, roc_auc) in enumerate(stop_results[dataset][method]):
                 if x is None:
                     # TODO: Decide what to do with missing observations
-                    data[ii].append(None)
-                if metric == "instances":
-                    data[ii].append(x)
+                    values.append(None)
+                elif metric == "instances":
+                    values.append(x)
                 elif metric == "holistic":
-                    data[ii].append(
+                    values.append(
                         (accuracy+roc_auc)/2*holistic_x*100-x
                     )
                 else:
                     metrics = {'accuracy_score': 0, 'f1_score': 1, 'roc_auc_score': 2}
-                    data[ii].append((accuracy, f1, roc_auc)[metrics[metric]])
-    print(data)
+                    values.append((accuracy, f1, roc_auc)[metrics[metric]])
+            if average:
+                if np.count_nonzero(values) == 0:
+                    # TODO: Replace -1e99 with passive values
+                    data[ii].append(1e99 if metric == "instances" else -1e99)
+                else:
+                    data[ii].append(np.mean([v for v in values if v is not None]))
+            else:
+                for v in values:
+                    penalty = 1e99 if metric == "instances" else -1e99
+                    data[ii].append(v if v is not None else penalty)
+    
+    #print(len(data))
+    #for x in data:
+    #    print(f"  {len(x)}")
     data = pd.DataFrame(np.array(data).T, columns=list(stop_results[list(stop_results.keys())[0]].keys()))
-
     autoranked = autorank(data, order='ascending' if metric == 'instances' else 'descending')
 
-    ax = plot_stats(autoranked)
-    ax.figure.suptitle(title or metric.rsplit("_score")[0].replace("_", " ").title());
+    ax = plot_stats(autoranked, ax=ax)
+    if ax is not None:
+        ax.set_title(title or metric.rsplit("_score")[0].replace("_", " ").title())
+    else:
+        ax.figure.suptitle(title or metric.rsplit("_score")[0].replace("_", " ").title())
     return ax

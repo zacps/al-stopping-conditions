@@ -80,7 +80,7 @@ def plot_classification(ax, clf, X, Y, X_all):
     X0, X1 = X[:, 0], X[:, 1]
     xx, yy = make_meshgrid(X_all[:, 0], X_all[:, 1])
 
-    plot_contours(ax, clf, xx, yy, cmap=plt.cm.coolwarm, alpha=0.8)
+    plot_contours(ax, clf, xx, yy, cmap=plt.cm.coolwarm, alpha=0.7)
     ax.scatter(X0, X1, c=Y, cmap=plt.cm.coolwarm, s=20, edgecolors="k")
     ax.set_xlim(xx.min(), xx.max())
     ax.set_ylim(yy.min(), yy.max())
