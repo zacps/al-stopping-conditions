@@ -59,6 +59,7 @@ from tabulate import tabulate
 from statsmodels.stats.inter_rater import fleiss_kappa
 from autorank import autorank, plot_stats
 from tvregdiff.tvregdiff import TVRegDiff
+from modAL.uncertainty import classifier_entropy
 
 import libdatasets
 from libutil import out_dir
@@ -68,34 +69,10 @@ class FailedToTerminate(Exception):
     def __init__(self, method):
         super().__init__(f"{method} failed to determine a stopping location")
 
-
-def optimal_ub(x, accuracy_score, f1_score, roc_auc_score, **kwargs):
-    # 150 samples is worth 1 percentage point of (accuracy/roc_auc)
-    return optimal(x, accuracy_score, f1_score, roc_auc_score, **kwargs, aggressiveness=-275 * 100)
-
-def optimal_lb(x, accuracy_score, f1_score, roc_auc_score, **kwargs):
-    # 20 samples is worth 1 percentage point of (accuracy/roc_auc)
-    return optimal(x, accuracy_score, f1_score, roc_auc_score, **kwargs, aggressiveness=-15 * 100)
-
-def optimal(x, accuracy_score, f1_score, roc_auc_score, aggressiveness=-75*100, **kwargs):
-    # 50 samples is worth 1 percentage point of (accuracy/roc_auc)
-    return x[np.argmin(
-        # Calculate the minimum, normalised metric. This gets double weight.
-        np.sum([
-            np.max([
-                accuracy_score.to_numpy()*aggressiveness*np.max(accuracy_score), 
-                f1_score.to_numpy()*aggressiveness*np.max(f1_score), 
-                roc_auc_score.to_numpy()*aggressiveness*np.max(roc_auc_score)
-            ], axis=0),
-            accuracy_score*aggressiveness,
-            f1_score*aggressiveness,
-            roc_auc_score*aggressiveness,
-        ],axis=0)/4 + x
-    )]
-
-
-def optimal_fixed(x, accuracy_score, f1_score, roc_auc_score, threshold=0.99, **kwargs):
-    return x[np.argmax((accuracy_score>=np.max(accuracy_score)*threshold) & (roc_auc_score>=np.max(roc_auc_score)*threshold))] # & (f1_score>=np.max(f1_score)*threshold)
+        
+class InvalidAssumption(Exception):
+    def __init__(self, method, reason):
+        super().__init__(f"{method} could not be evaluated because: {reason}")
 
 
 def SC_entropy_mcs(x, entropy_max, threshold=0.01, **kwargs):
@@ -108,6 +85,17 @@ def SC_entropy_mcs(x, entropy_max, threshold=0.01, **kwargs):
     if not (entropy_max<=threshold).any():
         raise FailedToTerminate('SC_entropy_mcs')
     return x.iloc[np.argmax(entropy_max<=threshold)]
+
+
+def SC_oracle_acc_mcs_values(classifiers, pre=None, **kwargs):
+    """
+    Determine a stopping point based on when the accuracy of the current classifier on the 
+    just-labelled samples is above a threshold.
+    
+    https://www.aclweb.org/anthology/I08-1048.pdf
+    """
+
+    return pre if pre is not None else acc(classifiers, nth='last')[1]
 
 
 def SC_oracle_acc_mcs(x, classifiers, threshold=0.9, **kwargs):
@@ -132,38 +120,10 @@ def SC_mes(x, expected_error_min, threshold=1e-2, **kwargs):
     
     https://www.aclweb.org/anthology/I08-1048.pdf
     """
-    
-    try:
+    if (expected_error_min <= threshold).any():
         return x.iloc[np.argmax(expected_error_min <= threshold)]
-    except IndexError:
-        raise FailedToTerminate('SC_mes')
-
-
-def ZPS_ee(x, expected_error_min, threshold=5e-2, **kwargs):
-    # WARN: This is slightly omniscient, but not in a way that should matter.
-    # TODO: FIX IT!
-    return x.iloc[np.argmax(expected_error_min <= threshold*np.max(expected_error_min))]
-
-
-def ZPS_ee_grad(x, expected_error_min, threshold=10, **kwargs):
-    grad = np.array(no_ahead_tvregdiff(expected_error_min[1:], 1, 1e-1, plotflag=False, diagflag=False))
     
-    second = np.array([np.nan, np.nan, np.nan, *no_ahead_tvregdiff(grad[2:], 1, 15, plotflag=False, diagflag=False)])
-    
-    start = np.argmax(second < 0)
-    
-    return x.iloc[(np.argmax(second[start:] >= threshold)+start) or -1]
-
-
-def ZPS_ee_grad_sub(x, expected_error_min, threshold=10, subsample=1, **kwargs):
-    expected_error_min_sub = expected_error_min[1::subsample]
-    grad = np.array(no_ahead_tvregdiff(expected_error_min_sub, 1, 1e-1, plotflag=False, diagflag=False))
-    
-    second = np.array(no_ahead_tvregdiff(grad[2:], 1, 15, plotflag=False, diagflag=False))
-    
-    start = np.argmax(second < 0)
-    
-    return x.iloc[1::subsample][2:][(np.argmax(second[start:] >= threshold)+start) or -1]
+    raise FailedToTerminate('SC_mes')
 
 
 def EVM(x, uncertainty_variance, uncertainty_variance_selected, selected=True, n=2, m=1e-3, **kwargs):
@@ -185,17 +145,32 @@ def EVM(x, uncertainty_variance, uncertainty_variance_selected, selected=True, n
     last = variance[0]
     for i, value in enumerate(variance[1:]):
         if current == 2:
-            return x[i-1]
+            # This used to be -1, which was a bug I think?
+            return x[i+1]
         if value < last-m:
             current += 1
         last = value
     raise FailedToTerminate('EVM')
+    
+    
+def VM(x, uncertainty_variance, uncertainty_variance_selected, selected=True, n=2, m=1e-3, **kwargs):
+    """
+    Determine a stopping point based on the variance of the uncertainty in the unlabelled pool.
+    
+    * `selected` determines if the variance is calculated accross the entire pool or only the instances 
+    to be selected.
+    
+    * `n` the number of values for which the variance must decrease sequentially, paper used `2`.
+    
+    https://www.aclweb.org/anthology/W10-0101.pdf
+    """
+    return EVM(x, uncertainty_variance, uncertainty_variance_selected, selected=selected, n=n, m=0)
 
 
-def SSNCut(x, classifiers, X_unlabelled, Y_oracle, m=.2, affinity='linear', **kwargs):
+def SSNCut(x, classifiers, X_unlabelled, Y_oracle, pre=None, m=.2, affinity='linear', **kwargs):
     if len(np.unique(classifiers[0].y_training)) > 2:
         return x.iloc[-1]
-    values = SSNCut_values(classifiers, X_unlabelled, Y_oracle, m=.2, affinity='linear')
+    values = pre if pre is not None else SSNCut_values(classifiers, X_unlabelled, Y_oracle, m=.2, affinity='linear')
     
     smallest = np.infty
     x0 = 0
@@ -219,6 +194,10 @@ def SSNCut_values(classifiers, X_unlabelled, Y_oracle, m=.2, affinity='linear', 
     
     file:///F:/Documents/Zotero/storage/DJGRDXSK/Fu%20and%20Yang%20-%202015%20-%20Low%20density%20separation%20as%20a%20stopping%20criterion%20for.pdf
     """
+    
+    if all(getattr(clf.estimator, 'kernel', None) != 'linear' for clf in classifiers):
+        raise InvalidAssumption('SSNCut', 'model is not a linear SVM')
+    
     unique_y = np.unique(classifiers[0].y_training)
     if len(unique_y) > 2:
         print("WARNING: SSNCut is not designed for non-binary classification")
@@ -255,7 +234,7 @@ def SSNCut_values(classifiers, X_unlabelled, Y_oracle, m=.2, affinity='linear', 
     return out
 
 
-def fscore_stop(x, classifiers, X_unlabelled, Y_oracle):
+def fscore_tvdiff(x, classifiers, X_unlabelled, Y_oracle):
     """
     'Performance convergence' using TVDiff gradient estimation
     https://www.aclweb.org/anthology/C08-1059
@@ -265,17 +244,70 @@ def fscore_stop(x, classifiers, X_unlabelled, Y_oracle):
     return x.iloc[2+np.argmax(grad[2:] < 0)]
 
 
+def contradictory_information(x, contradictory_information, rounds=3, **kwargs):
+    """
+    Stop when contradictory information drops for `rounds` consecutive rounds.
+    
+    https://www-sciencedirect-com.ezproxy.auckland.ac.nz/science/article/pii/S088523080700068X
+    """
+    
+    current = 0
+    last = contradictory_information[0]
+    for i, value in enumerate(contradictory_information[1:]):
+        if current == rounds:
+            return x[i+1]
+        if value < last:
+            current += 1
+        last = value
+    raise FailedToTerminate('contradictory_information')
 
-def performance_convergence(x, classifiers, X_unlabelled, Y_oracle, threshold=5e-5, k=10, average=np.mean):
-    # We use k=10 instead of 100 because batch size is 10 for us, 1 for them
-    # multiple thresholds tested by authors (1e-2, 5e-5)
-    perf = list(fscore(classifiers, X_unlabelled, Y_oracle))
+
+def performance_convergence(x, classifiers, X_unlabelled, Y_oracle, pre=None, threshold=5e-5, k=10, average=np.mean, **kwargs):
+    """
+    We use k=10 instead of 100 because batch size is 10 for us, 1 for them
+    multiple thresholds tested by authors (1e-2, 5e-5)
+    
+    https://www.aclweb.org/anthology/C08-1059.pdf
+    """
+    
+    perf = pre if pre is not None else list(fscore(classifiers, X_unlabelled, Y_oracle))
     windows = np.lib.stride_tricks.sliding_window_view(perf, k)
     for i in range(1, len(windows)):
         w2 = average(windows[i])
         w1 = average(windows[i-1])
         g = w2 - w1
         if windows[i][-1] > np.max(perf[:i+k]) and g > 0 and g < threshold:
+            return x.iloc[i+k]
+        
+    raise FailedToTerminate('performance_convergence')
+    
+    
+def uncertainty_convergence(x, classifiers, X_unlabelled, Y_oracle, pre=None, metric=classifier_entropy, aggregator=np.min, threshold=5e-5, k=10, average=np.median, **kwargs):
+    """
+    Stop based on the gradient of the last selected instance. The last selected instance supposedly has maximum uncertainty
+    and is hence the most informative.
+    
+    We use k=10 instead of 100 because batch size is 10 for us, 1 for them
+    multiple thresholds tested by authors (1e-2, 5e-5)
+    
+    Metrics:
+    * classifier_entropy
+    * classifier_margin
+    * classifier_minmax
+    
+    Threshold:
+    * 0.00005
+    
+    https://www.aclweb.org/anthology/C08-1059.pdf
+    """
+    
+    uncertainty = pre if pre is not None else metric_selected(classifiers, metric)
+    windows = np.lib.stride_tricks.sliding_window_view(uncertainty, k)
+    for i in range(1, len(windows)):
+        w2 = average(windows[i])
+        w1 = average(windows[i-1])
+        g = w2 - w1
+        if windows[i][-1] > np.max(uncertainty[:i+k]) and g > 0 and g < threshold:
             return x.iloc[i+k]
         
     raise FailedToTerminate('performance_convergence')
@@ -286,29 +318,32 @@ def fscore(classifiers, X_unlabelled, Y_oracle, **kwargs):
     https://www.aclweb.org/anthology/C08-1059
     """
     if hasattr(classifiers[0], 'X_unlabelled'):
-        # Don't store all pools in memory, generator expression
+        # Don't store all pools in memory, use a generator expression
         X_unlabelleds = (clf.X_unlabelled for clf in classifiers)
     else:
-        print("Reconstructing unlabelled pool")
         X_unlabelleds = reconstruct_unlabelled(classifiers, X_unlabelled, Y_oracle)
 
     for clf, X_unlabelled in zip(classifiers, X_unlabelleds):
-        print("X_unlabelled shape", X_unlabelled.shape)
+
         X_subsampled = X_unlabelled[np.random.choice(X_unlabelled.shape[0], min(X_unlabelled.shape[0], 1000), replace=False)]
-        print("X_subsampled shape", X_subsampled.shape)
-        predictions = clf.predict_proba(X_subsampled)
-        print("predictions shape", predictions.shape)
-        def tp():
-            return np.sum(np.max(predictions, axis=1))
 
-        def fp():
-            return np.sum(np.max(1 - predictions, axis=1))
+        p = clf.predict_proba(X_subsampled)
+        # d indicates if a particular prediction is from the winning (max probability) class
+        d = (p.T==np.max(p, axis=1)).T*1
 
-        def fn():
-            m_predictions = predictions.copy()[np.argmax(predictions, axis=1)] = 0
-            return np.sum(m_predictions)
+        
+        def tp(p, d):
+            "Sum of the probabilities of the winning predictions"
+            return np.sum(p*d)
 
-        yield 2*tp()/(2*tp()+fp()+fn())
+        def fp(p, d):
+            "Sum of (1-prob) for the winning prediction"
+            return np.sum((1-p)*d)
+
+        def fn(p, d):
+            return np.sum(p*(1-d))
+
+        yield 2*tp(p, d)/(2*tp(p, d)+fp(p, d)+fn(p, d))
 
 
 def reconstruct_unlabelled(clfs, X_unlabelled, Y_oracle):
@@ -407,6 +442,32 @@ def KD(x, classifiers, **kwargs):
         return x.iloc[-1]
     
     
+def metric_selected(classifiers, metric, aggregator=np.min, **kwargs):
+    """
+    Generator that produces the values of `metric` evaluated on the selected instances in each round of AL.
+    
+    The metric is then aggregated across the batch by the `aggregator` to produce a single value per round.
+    """
+    for i in range(1, len(classifiers)):
+        yield aggregator(metric(classifiers[i-1].estimator, classifiers[i].X_training[-10:]))
+    
+    yield np.nan
+    
+def max_confidence(x, classifiers, pre=None, threshold=0.001, **kwargs):
+    """
+    This strategy is based on uncertainty measurement, considering whether the entropy of each selected unlabelled 
+    example is less than a very small predefined threshold close to zero, such as 0.001.
+    
+    Note: The original authors only considered non-batch mode AL. We stop based on the mean of the entropy.
+    
+    https://www.aclweb.org/anthology/D07-1082.pdf
+    """
+    
+    metric = pre if pre is not None else metric_selected(classifier_entropy, classifiers)
+    if not (metric < threshold).any():
+        raise FailedToTerminate('max_confidence')
+
+    return x[np.argmax(metric<threshold)]
 
 
 def uncertainty_min(x, uncertainty_min, **kwargs):
@@ -561,6 +622,25 @@ def kappa_metric_but_not_and_broken(x, classifiers, X_unlabelled, k=3, **kwargs)
         k3 = np.sum(probabilities[i-1]*probabilities[i-2])
         assert k1 != np.nan and k2 != np.nan and k3 != np.nan
         kappa = np.mean([k1, k2, k3])
+        
+        out.append(kappa)
+
+    return np.array(out)
+
+
+def kappa_metric_first(x, classifiers, X_unlabelled, **kwargs):
+    from sklearn.preprocessing import OneHotEncoder
+    
+    out = [np.nan]
+    classes = np.unique(classifiers[0].y_training)
+    
+    X_subsampled = X_unlabelled[np.random.choice(X_unlabelled.shape[0], 1000, replace=False)] 
+    
+    predictions = np.array([clf.predict(X_subsampled) for clf in classifiers])
+        
+    for i in range(1, len(classifiers)):
+        # Compute kappa against the first trained classifier
+        kappa = cohen_kappa_score(predictions[0], predictions[i])
         
         out.append(kappa)
 
