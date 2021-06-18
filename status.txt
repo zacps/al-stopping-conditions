@@ -1,16 +1,21 @@
 nesi:
-  base 0-1, 10-19, 20-29
+  base 
+    0-1, 10-19, 20-29
   neural net 0-1
     slow, only splice & swarm completed as of 26/04/2021
     2-9 without expected error
-  decision tree 0-5, 6-9
-  random forest 2-5, 6-9
+  decision tree 
+    0-5, 6-9
+  random forest 
+    2-5, 6-9
   labelled
     100 6-9
   unbalanced
-    70 0-4 (skips one seed on one dataset)
+    70 0-4, 5-9 (skips one seed on one dataset)
+  bias
+    0-9 10-19
   easy/hard dataset (svm-linear only)
-    0-9
+    0-9, (10-19 20-29)
 
 colossal:
   base 2-3, 4-5, 6-7, (8-9 excluding newsgroups)
@@ -22,27 +27,27 @@ colossal:
     30% 0-1
     40% 0-1
   labelled
-    100 0-1, 2-3, 4-5 10-19
+    100 0-1, 2-3, 4-5 10-19 - 10-19 - 14-49 stopped while passive running; 20-29
      -> 0-5 need to be rerun as they are short (at least for rcv1)
-  random forest 0-1 
-  ~~unbalanced2-50 partial 0-1~~
-
-available to schedule:
-  newsgroups (w/o expected error)
-  
-  bias
-    0-9 10-19 20-29
-  
-upcoming:
-  labelled
-    100 20-29
-  random forest
-    10-19 20-29
+  random forest 
+    0-1 
+    10-19
   decision tree
     10-19 20-29
+  unbalanced
+    10-19 20-29
+  bias
+    20-29
+
+available to schedule:    
   noise
     X% 2-9 10-19 20-29
+  random forest
+    20-29
+  neural net
+    10-19 20-29
+  
+upcoming:
   extra dataset?
     ALL 0-9 10-19 20-29
-  easy/hard datset (svm-linear only)
-    10-19, 20-29
+    
