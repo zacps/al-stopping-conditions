@@ -62,7 +62,7 @@ from tvregdiff.tvregdiff import TVRegDiff
 from modAL.uncertainty import classifier_entropy
 
 import libdatasets
-from libutil import out_dir
+from libutil import out_dir, listify
 
 
 class FailedToTerminate(Exception):
@@ -442,6 +442,7 @@ def KD(x, classifiers, **kwargs):
         return x.iloc[-1]
     
     
+@listify
 def metric_selected(classifiers, metric, aggregator=np.min, **kwargs):
     """
     Generator that produces the values of `metric` evaluated on the selected instances in each round of AL.
