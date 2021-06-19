@@ -366,6 +366,40 @@ def uncertainty_convergence(
             return x.iloc[i + k]
 
     raise FailedToTerminate("performance_convergence")
+    
+    
+def classification_change(x, classifiers, X_unlabelled, Y_oracle, pre=None, **kwargs):
+    """
+    Stop if the predictions on the unlabelled pool does not change between two rounds.
+    
+    https://www.aclweb.org/anthology/C08-1142.pdf
+    """
+    
+    values = pre if pre is not None else classification_change_values(classifiers, X_unlabelled, Y_oracle)
+    
+    if not any(x==1 for x in values):
+        raise FailedToTerminate('classification_change')
+    
+    print(np.argmax(values==1))
+    return x.iloc[np.argmax(values==1)]
+    
+@listify
+def classification_change_values(classifiers, X_unlabelled, Y_oracle, **kwargs):
+    if hasattr(classifiers[0], "X_unlabelled"):
+        # Don't store all pools in memory, use a generator expression
+        X_unlabelleds = (clf.X_unlabelled for clf in classifiers)
+    else:
+        X_unlabelleds = reconstruct_unlabelled(classifiers, X_unlabelled, Y_oracle)
+        
+    # Skip the first pool
+    next(X_unlabelleds)
+        
+    yield np.nan
+    
+    for i, X_unlabelled in zip(range(1, len(classifiers)), X_unlabelleds):
+        yield np.count_nonzero(
+            classifiers[i-1].predict(X_unlabelled)==classifiers[i].predict(X_unlabelled)
+        )/X_unlabelled.shape[0]
 
 
 def fscore(classifiers, X_unlabelled, Y_oracle, **kwargs):
