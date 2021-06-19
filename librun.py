@@ -16,6 +16,7 @@ import requests
 import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
+
 try:
     from IPython.core.display import HTML, display
 except ModuleNotFoundError:
@@ -47,11 +48,21 @@ class Config:
     dataset_mutator: Callable = None
 
     def serialize(self):
-        meta_str = "__".join([f"{k}={v}" if k != "stop_function" else f"{k}={v[0]}" for k, v in self.meta.items()])
+        meta_str = "__".join(
+            [
+                f"{k}={v}" if k != "stop_function" else f"{k}={v[0]}"
+                for k, v in self.meta.items()
+            ]
+        )
         return f"{self.dataset_name}__{self.dataset_mutator_name}__{self.method_name}__{self.model_name}__{meta_str}"
-    
+
     def serialize_no_model(self):
-        meta_str = "__".join([f"{k}={v}" if k != "stop_function" else f"{k}={v[0]}" for k, v in self.meta.items()])
+        meta_str = "__".join(
+            [
+                f"{k}={v}" if k != "stop_function" else f"{k}={v[0]}"
+                for k, v in self.meta.items()
+            ]
+        )
         return f"{self.dataset_name}__{self.dataset_mutator_name}__{self.method_name}__{meta_str}"
 
     def json(self):
@@ -60,9 +71,11 @@ class Config:
             "method_name": self.method_name,
             "dataset_mutator_name": self.dataset_mutator_name,
             "model_name": self.model_name,
-            "meta": {k: v if k != "stop_function" else v[0] for k, v in self.meta.items()},
+            "meta": {
+                k: v if k != "stop_function" else v[0] for k, v in self.meta.items()
+            },
         }
-    
+
     def __repr__(self):
         return pformat(self.json())
 
@@ -88,13 +101,18 @@ class Configurations:
                                 meta=matrix["meta"],
                             )
                         )
-                        
+
     def __repr__(self):
-        return pformat({"meta": self.meta.__repr__(), "configurations": self.configurations.__repr__()})
+        return pformat(
+            {
+                "meta": self.meta.__repr__(),
+                "configurations": self.configurations.__repr__(),
+            }
+        )
 
     def __iter__(self, *args, **kwargs):
         return self.configurations.__iter__(*args, **kwargs)
-    
+
     def __getitem__(self, *args, **kwargs):
         return self.configurations.__getitem__(*args, **kwargs)
 
@@ -115,24 +133,26 @@ def run(
     fragment_length=1,
     fragment_run_start=None,
     fragment_run_end=None,
-    dry_run=False
+    dry_run=False,
 ):
     print(sys.argv)
     if fragment_id is None:
         __progress_hack()
     configurations = Configurations(matrix)
     start = monotonic()
-    
+
     # For NeSI
     if fragment_id is not None:
-        configurations.configurations = configurations.configurations[fragment_id:fragment_id+fragment_length]
-        
+        configurations.configurations = configurations.configurations[
+            fragment_id : fragment_id + fragment_length
+        ]
+
     # Monomorphise parametric meta parameters
     for config in configurations:
         for k, v in config.meta.items():
             if isinstance(v, dict):
                 config.meta[k] = v.get(config.dataset_name, v["*"])
-                
+
     # Exit if this is a dry run
     if dry_run:
         print("Exiting due to dry run:")
@@ -147,9 +167,13 @@ def run(
             workers = len(os.sched_getaffinity(0))
 
     if fragment_run_start is not None:
-        n_runs = (fragment_run_end-fragment_run_start+1) if fragment_run_end is not None else 1
+        n_runs = (
+            (fragment_run_end - fragment_run_start + 1)
+            if fragment_run_end is not None
+            else 1
+        )
     else:
-        n_runs = configurations.meta['n_runs']
+        n_runs = configurations.meta["n_runs"]
 
     try:
         results = ProgressParallel(
@@ -160,15 +184,22 @@ def run(
             backend=backend,
         )(
             delayed(__run_inner)(
-                config, force_cache=force_cache, force_run=force_run, abort=abort, metrics_measures=metrics, workers=workers, fragment_run_start=fragment_run_start, fragment_run_end=fragment_run_end
+                config,
+                force_cache=force_cache,
+                force_run=force_run,
+                abort=abort,
+                metrics_measures=metrics,
+                workers=workers,
+                fragment_run_start=fragment_run_start,
+                fragment_run_end=fragment_run_end,
             )
             for config in configurations
         )
-        if configurations.meta['ret_classifiers']:
+        if configurations.meta["ret_classifiers"]:
             # Figure out what runs we care about
             if fragment_run_start is not None:
                 if fragment_run_end is not None:
-                    runs = list(range(fragment_run_start, fragment_run_end+1))
+                    runs = list(range(fragment_run_start, fragment_run_end + 1))
                 else:
                     runs = [fragment_run_start]
             else:
@@ -177,32 +208,47 @@ def run(
             for i, config in enumerate(configurations):
                 results[i] = (results[i], [__read_classifiers(config, j) for j in runs])
     except Exception as e:
-        duration = monotonic()-start
-        
+        duration = monotonic() - start
+
         try:
             requests.post(
-                'https://discord.com/api/webhooks/809248326485934080/aIHL726wKxk42YpDI_GtjsqfAWuFplO3QrXoza1r55XRT9-Ao9Rt8sBtexZ-WXSPCtsv', 
-                data={'content': f"Run with {len(configurations)} experiments on {socket.gethostname()} **FAILED** after {duration/60/60:.1f}h\n```{e}```"}
+                "https://discord.com/api/webhooks/809248326485934080/aIHL726wKxk42YpDI_GtjsqfAWuFplO3QrXoza1r55XRT9-Ao9Rt8sBtexZ-WXSPCtsv",
+                data={
+                    "content": f"Run with {len(configurations)} experiments on {socket.gethostname()} **FAILED** after {duration/60/60:.1f}h\n```{e}```"
+                },
             )
         except ConnectionError as con_err:
             print(f"Couldn't send failed notification because: {con_err}")
         raise e
-    
-    duration = monotonic()-start
-    
-    if duration > 10*60 or fragment_id is not None:
+
+    duration = monotonic() - start
+
+    if duration > 10 * 60 or fragment_id is not None:
         try:
             requests.post(
-                'https://discord.com/api/webhooks/809248326485934080/aIHL726wKxk42YpDI_GtjsqfAWuFplO3QrXoza1r55XRT9-Ao9Rt8sBtexZ-WXSPCtsv', 
-                data={'content': f"Run with {len(configurations)} experiments on {socket.gethostname()} completed after {duration/60/60:.1f}h"}
+                "https://discord.com/api/webhooks/809248326485934080/aIHL726wKxk42YpDI_GtjsqfAWuFplO3QrXoza1r55XRT9-Ao9Rt8sBtexZ-WXSPCtsv",
+                data={
+                    "content": f"Run with {len(configurations)} experiments on {socket.gethostname()} completed after {duration/60/60:.1f}h"
+                },
             )
         except ConnectionError as con_err:
             print(f"Couldn't send failed notification because: {con_err}")
-            
+
     return results
 
 
-def plot(results, plot_robustness=False, key=None, series=None, title=None, ret=False, sort=True, figsize=(18,4), extra=0, scale='linear'):
+def plot(
+    results,
+    plot_robustness=False,
+    key=None,
+    series=None,
+    title=None,
+    ret=False,
+    sort=True,
+    figsize=(18, 4),
+    extra=0,
+    scale="linear",
+):
     if key is None:
         key = lambda config_result: (
             config_result[0].dataset_name,
@@ -218,7 +264,9 @@ def plot(results, plot_robustness=False, key=None, series=None, title=None, ret=
     groups = groupby(results, key)
     figaxes = []
     for k, group in groups:
-        fig, axes = plt.subplots(1, (4 if plot_robustness else 3)+extra, figsize=figsize)
+        fig, axes = plt.subplots(
+            1, (4 if plot_robustness else 3) + extra, figsize=figsize
+        )
         figaxes.append((fig, axes))
 
         for config, result in group:
@@ -227,7 +275,9 @@ def plot(results, plot_robustness=False, key=None, series=None, title=None, ret=
                     result = result[0].average2(result[1:])
                 else:
                     result = average(result[0], result[1:])
-            for i, ax in enumerate(axes.flatten()[:-extra if extra != 0 else len(axes.flatten())]):
+            for i, ax in enumerate(
+                axes.flatten()[: -extra if extra != 0 else len(axes.flatten())]
+            ):
                 try:
                     i_stderr = result.columns.get_loc("accuracy_score_stderr")
                     has_stderr = True
@@ -277,24 +327,37 @@ def table(results, tablefmt="fancy_grid"):
 
     def max_at(result, has_err, metric):
         try:
-            upper = result[metric]+result[f"{metric}_stderr"]
+            upper = result[metric] + result[f"{metric}_stderr"]
             norm = result[result[metric].ge(result[metric].iloc[-1])].iloc[0].x
-            return f"{norm:.0f}" + f"±{abs(result[upper.ge(result[metric].iloc[-1])].iloc[0].x-norm):.0f}" if has_err else ""
+            return (
+                f"{norm:.0f}"
+                + f"±{abs(result[upper.ge(result[metric].iloc[-1])].iloc[0].x-norm):.0f}"
+                if has_err
+                else ""
+            )
         except IndexError:
             return "-"
-        
+
     def area_under(result, has_err, metric, baseline=1):
         return f"{skmetrics.auc(result['x'], result[metric])/baseline:.4f}" + (
             f"±{(skmetrics.auc(result['x'], result[metric]+result[metric+'_stderr'])-skmetrics.auc(result['x'], result[metric]))/baseline:.0g}"
             if has_err
             else ""
         )
+
     def baseline(group, metric):
-        return next((skmetrics.auc(result['x'], result[metric]) for conf, result in group if conf.method_name == "random"), 1)
+        return next(
+            (
+                skmetrics.auc(result["x"], result[metric])
+                for conf, result in group
+                if conf.method_name == "random"
+            ),
+            1,
+        )
 
     for k, group in groups:
         has_err = not math.isnan(results[0][1].accuracy_score_stderr[0])
-        
+
         group = list(group)
         print(k[0])
         print(
@@ -303,48 +366,87 @@ def table(results, tablefmt="fancy_grid"):
                     [
                         [
                             conf.method_name,
-                            area_under(result, has_err, "accuracy_score", baseline=baseline(group, "accuracy_score")),
-                            area_under(result, has_err, "f1_score", baseline=baseline(group, "f1_score")),
-                            area_under(result, has_err, "roc_auc_score", baseline=baseline(group, "roc_auc_score")),
+                            area_under(
+                                result,
+                                has_err,
+                                "accuracy_score",
+                                baseline=baseline(group, "accuracy_score"),
+                            ),
+                            area_under(
+                                result,
+                                has_err,
+                                "f1_score",
+                                baseline=baseline(group, "f1_score"),
+                            ),
+                            area_under(
+                                result,
+                                has_err,
+                                "roc_auc_score",
+                                baseline=baseline(group, "roc_auc_score"),
+                            ),
                             max_at(result, has_err, "accuracy_score"),
                             max_at(result, has_err, "roc_auc_score"),
-                            result.time.sum() if 'time' in result else None
+                            result.time.sum() if "time" in result else None,
                         ]
                         for conf, result in group
                     ],
                     key=lambda x: -float(x[1].split("±")[0]),
                 ),
                 tablefmt=tablefmt,
-                headers=["method", "AUC LAC", "AUC LF1C", "AUC AUC ROC", "Instances to max accuracy", "Instances to max AUC ROC", "Time"],
+                headers=[
+                    "method",
+                    "AUC LAC",
+                    "AUC LF1C",
+                    "AUC AUC ROC",
+                    "Instances to max accuracy",
+                    "Instances to max AUC ROC",
+                    "Time",
+                ],
             )
         )
 
 
-def __run_inner(config, force_cache=False, force_run=False, backend="loky", abort=None, metrics_measures=None, workers=None, fragment_run_start=None, fragment_run_end=None):
+def __run_inner(
+    config,
+    force_cache=False,
+    force_run=False,
+    backend="loky",
+    abort=None,
+    metrics_measures=None,
+    workers=None,
+    fragment_run_start=None,
+    fragment_run_end=None,
+):
     if metrics_measures is None:
         metrics_measures = [
             accuracy_score,
             f1_score,
             roc_auc_score,
-            #empirical_robustness,
-            "time"
+            # empirical_robustness,
+            "time",
         ]
-        
+
     # Figure out what runs we care about
     if fragment_run_start is not None:
         if fragment_run_end is not None:
-            runs = list(range(fragment_run_start, fragment_run_end+1))
+            runs = list(range(fragment_run_start, fragment_run_end + 1))
         else:
             runs = [fragment_run_start]
     else:
         runs = list(range(config.meta["n_runs"]))
-    
+
     try:
         try:
-            cached_config, metrics = __read_result(f"{out_dir()}{os.path.sep}{config.serialize()}.csv", config, runs=runs)
+            cached_config, metrics = __read_result(
+                f"{out_dir()}{os.path.sep}{config.serialize()}.csv", config, runs=runs
+            )
         except FileNotFoundError as e:
             if config.model_name == None or config.model_name == "svm-linear":
-                cached_config, metrics = __read_result(f"{out_dir()}{os.path.sep}{config.serialize_no_model()}.csv", config, runs=runs)
+                cached_config, metrics = __read_result(
+                    f"{out_dir()}{os.path.sep}{config.serialize_no_model()}.csv",
+                    config,
+                    runs=runs,
+                )
                 cached_config.model_name = "svm-linear"
             else:
                 raise e
@@ -354,8 +456,10 @@ def __run_inner(config, force_cache=False, force_run=False, backend="loky", abor
 
     except (FileNotFoundError, EOFError, pd.errors.EmptyDataError):
         if force_cache:
-            raise Exception(f"Cache file '{out_dir()}{os.path.sep}{config.serialize()}.csv' not found")
-            
+            raise Exception(
+                f"Cache file '{out_dir()}{os.path.sep}{config.serialize()}.csv' not found"
+            )
+
         if workers is None:
             workers = os.cpu_count()
             if "sched_getaffinity" in dir(os):
@@ -365,7 +469,7 @@ def __run_inner(config, force_cache=False, force_run=False, backend="loky", abor
             # Seed a random state generator. This seed is constant between methods/datasets/models so comparisons can be made with fewer runs.
             # It is however *variant* with each run.
             random_state = [check_random_state(i) for i in runs]
-            
+
             metrics = ProgressParallel(
                 n_jobs=min(len(runs), workers),
                 total=len(runs),
@@ -377,109 +481,135 @@ def __run_inner(config, force_cache=False, force_run=False, backend="loky", abor
                     lambda dataset, method, i, random_state: MyActiveLearner(
                         # It's important that the split is re-randomised per run.
                         *active_split(
-                            *dataset, 
-                            labeled_size=config.meta.get("labelled_size", 0.1), 
-                            test_size=config.meta.get("test_size", 0.5), 
-                            ensure_y=config.meta.get("ensure_y", False), 
+                            *dataset,
+                            labeled_size=config.meta.get("labelled_size", 0.1),
+                            test_size=config.meta.get("test_size", 0.5),
+                            ensure_y=config.meta.get("ensure_y", False),
                             random_state=random_state,
                             mutator=config.dataset_mutator,
                             config_str=config.serialize(),
-                            i=i
+                            i=i,
                         ),
                         method,
                         metrics=metrics_measures,
                         model=config.model_name.lower(),
                         ret_classifiers=config.meta.get("ret_classifiers", False),
                         stop_info=config.meta.get("stop_info", False),
-                        stop_function=config.meta.get("stop_function", ("default", lambda learner: False))[1],
+                        stop_function=config.meta.get(
+                            "stop_function", ("default", lambda learner: False)
+                        )[1],
                         config_str=config.serialize(),
                         i=i,
                         pool_subsample=config.meta.get("pool_subsample", None),
-                        ee=config.meta.get("ee", "offline")
+                        ee=config.meta.get("ee", "offline"),
                     ).active_learn2()
                 )(config.dataset(), config.method, i, random_state[idx])
                 for idx, i in enumerate(runs)
             )
-            
+
         except Exception as e:
             if abort:
                 raise e
             print("WARN: Experiment failed, continuing anyway")
             return (config, None)
-        
+
         if config.meta.get("aggregate", True):
             metrics = metrics[0].average2(metrics[1:])
 
         __write_result(config, metrics, runs)
         for i in runs:
             try:
-                os.remove(f"{out_dir()}{os.path.sep}runs{os.path.sep}{config.serialize()}_{i}.csv")
+                os.remove(
+                    f"{out_dir()}{os.path.sep}runs{os.path.sep}{config.serialize()}_{i}.csv"
+                )
             except FileNotFoundError:
                 pass
 
-    
     return (config, metrics)
 
 
-
-def plot_stop(plots, classifiers, stop_conditions, stop_results, scale='linear', figsize=(26, 4)):
+def plot_stop(
+    plots, classifiers, stop_conditions, stop_results, scale="linear", figsize=(26, 4)
+):
     figaxes = plot(plots, ret=True, sort=False, extra=2, scale=scale, figsize=figsize)
     for i, (fig, ax) in enumerate(figaxes):
         clfs = classifiers[i]
         metrics = plots[i][1]
-        
+
         for j, clfs_ in enumerate(clfs):
             if len(clfs_) < 100:
-                raise Exception(f'short classifier file: {plots[i][0].serialize()}_{j}.zip\nIt has length {len(clfs_)} when it should have length 100')
-        
-        if plots[i][0].dataset_mutator_name != 'none':
+                raise Exception(
+                    f"short classifier file: {plots[i][0].serialize()}_{j}.zip\nIt has length {len(clfs_)} when it should have length 100"
+                )
+
+        if plots[i][0].dataset_mutator_name != "none":
             scores = __get_passive_scores(plots[i][0], range(len(plots[i][1])))
             for ax, score in zip(ax, scores):
-                ax.axhline(score, color='tab:gray', ls='--')
-            
-        prop_cycle = plt.rcParams['axes.prop_cycle']
-        colors = prop_cycle.by_key()['color']
+                ax.axhline(score, color="tab:gray", ls="--")
+
+        prop_cycle = plt.rcParams["axes.prop_cycle"]
+        colors = prop_cycle.by_key()["color"]
 
         accs = [first_acc(clfs_)[1] for clfs_ in clfs]
         accx = first_acc(clfs[0])[0]
-                
+
         acc_median = np.median(accs, axis=0)
         acc_stderr = np.std(accs, axis=0)
-        
-        ax[-1].plot(metrics[0].x[:acc_median.shape[0]], acc_median)
-        ax[-1].set_title("First classifier accuracy")
-        
-        ax1 = ax[-1].twinx()
-        ax1.axhline(0, ls='--', color='grey', alpha=0.8)
-        ax1.plot(metrics[0].x[:acc_median.shape[0]], no_ahead_tvregdiff(acc_median, 1, 1e-1, plotflag=False, diagflag=False), ls='--')
 
-        if 'expected_error_min' in metrics[0]:
-            ax[-2].plot(metrics[0].x, metrics[0].expected_error_min, ls='--')
+        ax[-1].plot(metrics[0].x[: acc_median.shape[0]], acc_median)
+        ax[-1].set_title("First classifier accuracy")
+
+        ax1 = ax[-1].twinx()
+        ax1.axhline(0, ls="--", color="grey", alpha=0.8)
+        ax1.plot(
+            metrics[0].x[: acc_median.shape[0]],
+            no_ahead_tvregdiff(acc_median, 1, 1e-1, plotflag=False, diagflag=False),
+            ls="--",
+        )
+
+        if "expected_error_min" in metrics[0]:
+            ax[-2].plot(metrics[0].x, metrics[0].expected_error_min, ls="--")
             ax[-2].set_title("expected_error_min")
 
             ax2 = ax[-2].twinx()
-            ax2.axhline(0, ls='--', color='grey', alpha=0.8)
-            ee_first = no_ahead_tvregdiff(metrics[0].expected_error_min[1:], 1, 1e2, plotflag=False, diagflag=False)
-            ee_second = no_ahead_tvregdiff(ee_first[2:], 1, 15, plotflag=False, diagflag=False)
-            ax2.plot(metrics[0].x[1:], ee_first/np.max(np.abs(ee_first[2:])), label='1st')
-            ax2.plot(metrics[0].x[3:], ee_second/np.max(np.abs(ee_second[2:])), label='2nd')
+            ax2.axhline(0, ls="--", color="grey", alpha=0.8)
+            ee_first = no_ahead_tvregdiff(
+                metrics[0].expected_error_min[1:],
+                1,
+                1e2,
+                plotflag=False,
+                diagflag=False,
+            )
+            ee_second = no_ahead_tvregdiff(
+                ee_first[2:], 1, 15, plotflag=False, diagflag=False
+            )
+            ax2.plot(
+                metrics[0].x[1:], ee_first / np.max(np.abs(ee_first[2:])), label="1st"
+            )
+            ax2.plot(
+                metrics[0].x[3:], ee_second / np.max(np.abs(ee_second[2:])), label="2nd"
+            )
             ax2.legend()
 
             align_yaxis(ax[-2], ax2)
 
-        for ii, a in enumerate(ax):        
+        for ii, a in enumerate(ax):
             for iii, (name, cond) in enumerate(stop_conditions.items()):
                 stops = stop_results[plots[i][0].dataset_name][name]
                 for iiii, stop in enumerate(stops):
                     if stop[0] is not None:
-                        #print(stop)
-                        a.axvline(stop[0], label=name if ii == 0 and iiii ==0 else None, color=colors[(iii+1) % len(colors)])
+                        # print(stop)
+                        a.axvline(
+                            stop[0],
+                            label=name if ii == 0 and iiii == 0 else None,
+                            color=colors[(iii + 1) % len(colors)],
+                        )
                         break
 
         fig.legend()
         fig.tight_layout()
-        
-        
+
+
 def __get_passive_scores(conf, runs):
     """
     Get the performance scores that would be obtained by a passive classifier trained on all the
@@ -490,36 +620,43 @@ def __get_passive_scores(conf, runs):
         with open(fname, "rb") as f:
             results = pickle.load(f)
             if all([run in last.keys() for run in runs]):
-                return [[np.min([result[i] for result in results]),np.mean([result[i] for result in results]),np.max([result[i] for result in results])] for i in range(3)]
+                return [
+                    [
+                        np.min([result[i] for result in results]),
+                        np.mean([result[i] for result in results]),
+                        np.max([result[i] for result in results]),
+                    ]
+                    for i in range(3)
+                ]
     except FileNotFoundError:
         results = {}
-    
-    assert conf.model_name == 'svm-linear'
-    
-    X,y = getattr(libdatasets, conf.dataset_name)(None)
-    
+
+    assert conf.model_name == "svm-linear"
+
+    X, y = getattr(libdatasets, conf.dataset_name)(None)
+
     for i in runs:
         if i in results.keys():
             continue
         _, X_unlabelled, y_labelled, y_oracle, X_test, y_test = active_split(
-            X, y, labeled_size=conf.meta['labelled_size'], test_size=conf.meta['test_size'], random_state=check_random_state(i), ensure_y=conf.meta['ensure_y']
-
+            X,
+            y,
+            labeled_size=conf.meta["labelled_size"],
+            test_size=conf.meta["test_size"],
+            random_state=check_random_state(i),
+            ensure_y=conf.meta["ensure_y"],
         )
-        clf = SVC(probability=True, kernel='linear')
+        clf = SVC(probability=True, kernel="linear")
         clf.fit(X_unlabelled, y_oracle)
         predicted = clf.predict(X_test)
         predict_proba = clf.predict_proba(X_test)
         unique_labels = np.unique(y_labelled)
 
         if len(unique_labels) > 2 or len(unique_labels.shape[0]) > 1:
-            roc_auc = roc_auc_score(
-                y_test, predict_proba, multi_class="ovr"
-            )
+            roc_auc = roc_auc_score(y_test, predict_proba, multi_class="ovr")
         else:
-            roc_auc = roc_auc_score(
-                y_test, predict_proba[:, 1]
-        )
-    
+            roc_auc = roc_auc_score(y_test, predict_proba[:, 1])
+
         results[i] = [
             accuracy_score(y_test, predicted),
             f1_score(
@@ -528,12 +665,19 @@ def __get_passive_scores(conf, runs):
                 average="micro" if len(unique_labels) > 2 else "binary",
                 pos_label=unique_labels[1] if len(unique_labels) <= 2 else 1,
             ),
-            roc_auc
+            roc_auc,
         ]
         with open(fname, "wb") as f:
             pickle.dump(f, results)
-        
-    return [[np.min([result[i] for result in results]),np.mean([result[i] for result in results]),np.max([result[i] for result in results])] for i in range(3)]
+
+    return [
+        [
+            np.min([result[i] for result in results]),
+            np.mean([result[i] for result in results]),
+            np.max([result[i] for result in results]),
+        ]
+        for i in range(3)
+    ]
 
 
 def __write_result(config, result, runs):
@@ -550,28 +694,39 @@ def __write_result(config, result, runs):
             json.dump(config.json(), f)
             f.write("\n")
             result.to_csv(f)
-        
-        
+
+
 def __read_classifiers(config, i=None):
-    pfile = f"{out_dir()}{os.path.sep}classifiers{os.path.sep}{config.serialize()}.pickle"
-    zfile = f"{out_dir()}{os.path.sep}classifiers{os.path.sep}{config.serialize()}_{i}.zip"
+    pfile = (
+        f"{out_dir()}{os.path.sep}classifiers{os.path.sep}{config.serialize()}.pickle"
+    )
+    zfile = (
+        f"{out_dir()}{os.path.sep}classifiers{os.path.sep}{config.serialize()}_{i}.zip"
+    )
     try:
         with open(pfile, "rb") as f:
             return pickle.load(f)
     except FileNotFoundError:
         return CompressedStore(zfile, read=True)
 
+
 def __read_result(file, config, runs=None):
     if config.meta.get("aggregate", True):
         with open(file, "r") as f:
-            cached_config = Config(**{"model_name": "svm-linear", **json.loads(f.readline())})
+            cached_config = Config(
+                **{"model_name": "svm-linear", **json.loads(f.readline())}
+            )
             result = pd.read_csv(f, index_col=0)
         return (cached_config, result)
     else:
         results = []
-        for name in [f"{out_dir()}{os.path.sep}{config.serialize()}_{i}.csv" for i in runs]:
+        for name in [
+            f"{out_dir()}{os.path.sep}{config.serialize()}_{i}.csv" for i in runs
+        ]:
             with open(name, "r") as f:
-                cached_config = Config(**{"model_name": "svm-linear", **json.loads(f.readline())})
+                cached_config = Config(
+                    **{"model_name": "svm-linear", **json.loads(f.readline())}
+                )
                 results.append(pd.read_csv(f, index_col=0))
         # make the run numbers available
         cached_config.runs = runs

@@ -16,19 +16,14 @@ from libdatasets import *
 from libadversarial import uncertainty_stop
 
 matrix = {
-    "datasets": [
-        ("htru2", wrap(htru2, None)),
-        ("cifar10", wrap(cifar10, None))        
-    ],
+    "datasets": [("htru2", wrap(htru2, None)), ("cifar10", wrap(cifar10, None))],
     "dataset_mutators": {
         "none": (lambda *x, **kwargs: x),
     },
     "methods": [
         ("uncertainty", partial(uncertainty_stop, n_instances=10)),
     ],
-    "models": [
-        "svm-linear"
-    ],
+    "models": ["svm-linear"],
     "meta": {
         "dataset_size": 1000,
         "labelled_size": 10,
@@ -38,9 +33,12 @@ matrix = {
         "ensure_y": True,
         "stop_info": True,
         "aggregate": False,
-        "stop_function": ("len1000", lambda learner: learner.y_training.shape[0] >= 1000),
-        "pool_subsample": 1000
-    }
+        "stop_function": (
+            "len1000",
+            lambda learner: learner.y_training.shape[0] >= 1000,
+        ),
+        "pool_subsample": 1000,
+    },
 }
 
 capture_metrics = [
@@ -50,7 +48,6 @@ capture_metrics = [
     "time",
     "time_total",
     "time_ee",
-    
     "uncertainty_average",
     "uncertainty_min",
     "uncertainty_max",
@@ -69,18 +66,19 @@ capture_metrics = [
     "expected_error_variance",
 ]
 
+
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument('fragment_id', type=int)
-    parser.add_argument('fragment_length', type=int)
-    parser.add_argument('fragment_run')
-    parser.add_argument('--dry-run', action='store_true')
-    parser.add_argument('--workers', type=int, default=None)
-    parser.add_argument('--nobackup', action='store_true')
+    parser.add_argument("fragment_id", type=int)
+    parser.add_argument("fragment_length", type=int)
+    parser.add_argument("fragment_run")
+    parser.add_argument("--dry-run", action="store_true")
+    parser.add_argument("--workers", type=int, default=None)
+    parser.add_argument("--nobackup", action="store_true")
 
     args = parser.parse_args()
 
-    fragment_run = args.fragment_run.split('-')
+    fragment_run = args.fragment_run.split("-")
     start = int(fragment_run[0])
     if len(fragment_run) == 2:
         end = int(fragment_run[1])
@@ -88,18 +86,18 @@ def main():
         end = None
 
     if args.nobackup:
-        os.environ['OUT_DIR'] = "/home/zpul156/out_nobackup"
+        os.environ["OUT_DIR"] = "/home/zpul156/out_nobackup"
 
     librun.run(
-        matrix, 
+        matrix,
         metrics=capture_metrics,
-        #abort=False,
+        # abort=False,
         fragment_id=args.fragment_id,
         fragment_length=args.fragment_length,
         fragment_run_start=start,
         fragment_run_end=end,
         dry_run=args.dry_run,
-        workers=args.workers
+        workers=args.workers,
     )
 
 

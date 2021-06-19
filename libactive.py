@@ -11,6 +11,7 @@ import dill
 import matplotlib.pyplot as plt
 import numpy as np
 from celluloid import Camera
+
 try:
     from IPython.core.display import display
 except ModuleNotFoundError:
@@ -45,7 +46,18 @@ except Exception:
     pass
 
 
-def active_split(X, Y, test_size=0.5, labeled_size=0.1, shuffle=True, ensure_y=False, random_state=None, mutator=lambda *args, **kwargs: args, config_str=None, i=None):
+def active_split(
+    X,
+    Y,
+    test_size=0.5,
+    labeled_size=0.1,
+    shuffle=True,
+    ensure_y=False,
+    random_state=None,
+    mutator=lambda *args, **kwargs: args,
+    config_str=None,
+    i=None,
+):
     """
     Split data into three sets:
     * Labeled training set (0.1)
@@ -56,22 +68,35 @@ def active_split(X, Y, test_size=0.5, labeled_size=0.1, shuffle=True, ensure_y=F
     X_train, X_test, Y_train, Y_test = train_test_split(
         X, Y, test_size=test_size, shuffle=shuffle, random_state=random_state
     )
-    
-    
+
     # Apply a mutator (noise, unbalance, bias, etc) to the dataset
-    X_unlabelled, X_test, Y_oracle, Y_test = mutator(X_train, X_test, Y_train, Y_test, rand=random_state, config_str=config_str, i=i, test_size=test_size, shuffle=shuffle)
+    X_unlabelled, X_test, Y_oracle, Y_test = mutator(
+        X_train,
+        X_test,
+        Y_train,
+        Y_test,
+        rand=random_state,
+        config_str=config_str,
+        i=i,
+        test_size=test_size,
+        shuffle=shuffle,
+    )
 
     unique = np.unique(np.concatenate((Y_test, Y_oracle)))
 
-    X_labelled = np.empty((0, X_unlabelled.shape[1])) if not isinstance(X, scipy.sparse.csr_matrix) else scipy.sparse.csr_matrix((0, X_unlabelled.shape[1]))
+    X_labelled = (
+        np.empty((0, X_unlabelled.shape[1]))
+        if not isinstance(X, scipy.sparse.csr_matrix)
+        else scipy.sparse.csr_matrix((0, X_unlabelled.shape[1]))
+    )
     Y_labelled = np.empty(0 if len(Y_oracle.shape) == 1 else (0, Y_oracle.shape[1]))
-    
+
     # ensure a label for all classes made it in to the initial train and validation sets
     for klass in unique:
         if not np.isin(klass, Y_labelled):
             # First value chosen is effectively constant random as the dataset is shuffled
-            idx = np.where(Y_oracle==klass)[0][0]
-            
+            idx = np.where(Y_oracle == klass)[0][0]
+
             Y_labelled = np.concatenate((Y_labelled, [Y_oracle[idx]]), axis=0)
 
             if isinstance(X_unlabelled, scipy.sparse.csr_matrix):
@@ -86,12 +111,14 @@ def active_split(X, Y, test_size=0.5, labeled_size=0.1, shuffle=True, ensure_y=F
 
     if labeled_size < 1:
         labeled_size = labeled_size * X.shape[0]
-            
+
     if X_labelled.shape[0] < labeled_size:
-        idx = random_state.choice(X_unlabelled.shape[0], labeled_size-X_labelled.shape[0], replace=False)
-        
+        idx = random_state.choice(
+            X_unlabelled.shape[0], labeled_size - X_labelled.shape[0], replace=False
+        )
+
         Y_labelled = np.concatenate((Y_labelled, Y_oracle[idx]), axis=0)
-        
+
         if isinstance(X_unlabelled, scipy.sparse.csr_matrix):
             X_labelled = csr_vappend(X_labelled, X_unlabelled[idx])
         else:
@@ -101,17 +128,24 @@ def active_split(X, Y, test_size=0.5, labeled_size=0.1, shuffle=True, ensure_y=F
             X_unlabelled = delete_from_csr(X_unlabelled, row_indices=idx)
         else:
             X_unlabelled = np.delete(X_unlabelled, idx, axis=0)
-                    
+
     # Sanity checks
-    assert X_labelled.shape[0] == Y_labelled.shape[0] and Y_labelled.shape[0] >= labeled_size, "Labelled length inconsistent"
+    assert (
+        X_labelled.shape[0] == Y_labelled.shape[0]
+        and Y_labelled.shape[0] >= labeled_size
+    ), "Labelled length inconsistent"
     assert X_unlabelled.shape[0] == Y_oracle.shape[0], "Unlabelled length inconsistent"
     assert X_test.shape[0] == Y_test.shape[0], "Test length inconsistent"
-    assert X_labelled.shape[1] == X_unlabelled.shape[1] == X_test.shape[1], "X shape inconsistent"
-                
+    assert (
+        X_labelled.shape[1] == X_unlabelled.shape[1] == X_test.shape[1]
+    ), "X shape inconsistent"
+
     return X_labelled, X_unlabelled, Y_labelled, Y_oracle, X_test, Y_test
 
 
-def active_split_query_synthesis(X, Y, test_size=0.5, labeled_size=0.1, shuffle=True, random_state=None):
+def active_split_query_synthesis(
+    X, Y, test_size=0.5, labeled_size=0.1, shuffle=True, random_state=None
+):
     """
     Split data into three sets:
     * Labeled training set (0.1)
@@ -143,15 +177,13 @@ class MyActiveLearner:
         X_test,
         Y_test,
         query_strategy,
-
         stop_function=lambda learner: False,
         ret_classifiers=False,
         stop_info=False,
         config_str=None,
         i=None,
         pool_subsample=None,
-        ee='offline',
-
+        ee="offline",
         model="svm-linear",
         animate=False,
         metrics=None,
@@ -167,9 +199,9 @@ class MyActiveLearner:
         self.X_test = X_test
         self.Y_test = Y_test
         self.query_strategy = query_strategy
-        
+
         self.unique_labels = np.unique(Y_test)
-        
+
         self.stop_function = stop_function
         self.ret_classifiers = ret_classifiers
         self.stop_info = stop_info
@@ -177,7 +209,7 @@ class MyActiveLearner:
         self.i = i
         self.pool_subsample = pool_subsample
         self.model = model
-        
+
         self.animate = animate
         self.metrics = Metrics(metrics=metrics)
         self.animation_file = animation_file
@@ -185,7 +217,7 @@ class MyActiveLearner:
 
         self.lb = lb
         self.ub = ub
-        
+
         if ee == "online":
             self.ee = expected_error_online
         elif ee == "offline":
@@ -267,8 +299,8 @@ class MyActiveLearner:
         elif self.model == "neural-network":
             return ActiveLearner(
                 estimator=MLPClassifier(
-                    hidden_layer_sizes=(100,), # default
-                    activation='relu', # default
+                    hidden_layer_sizes=(100,),  # default
+                    activation="relu",  # default
                 ),
                 X_training=self.X_labelled,
                 y_training=self.Y_labelled,
@@ -405,7 +437,7 @@ class MyActiveLearner:
 
         Returns metrics describing the performance of the query strategy, and optionally all classifiers trained during learning.
         """
-        
+
         # If this experiment run has been completed previously return the saved result
         cached = self._restore_run()
         if cached is not None:
@@ -413,42 +445,58 @@ class MyActiveLearner:
 
         # Attempt to restore a checkpoint
         checkpoint = self._restore_checkpoint()
-        
+
         if checkpoint is None:
             self.learner = self.__setup_learner()
-            self.metrics.collect(self.X_labelled.shape[0], self.learner.estimator, self.Y_test, self.X_test)
+            self.metrics.collect(
+                self.X_labelled.shape[0],
+                self.learner.estimator,
+                self.Y_test,
+                self.X_test,
+            )
         else:
             print("Restoring from checkpoint")
             self = checkpoint
-            
+
         # Classifiers are stored as a local and explicitly restored as they need to be compressed before being stored.
-        with store(f"{out_dir()}/classifiers/{self.config_str}_{self.i}.zip", enable=self.ret_classifiers, restore=checkpoint is not None) as classifiers:
+        with store(
+            f"{out_dir()}/classifiers/{self.config_str}_{self.i}.zip",
+            enable=self.ret_classifiers,
+            restore=checkpoint is not None,
+        ) as classifiers:
             # Initial subsampling, this should probably be done somewhere else tbh...
             if checkpoint is None:
                 if self.pool_subsample is not None:
                     # TODO: Should this random be seeded?
-                    self.X_subsampled = self.X_unlabelled[np.random.choice(self.X_unlabelled.shape[0], self.pool_subsample, replace=False)] 
+                    self.X_subsampled = self.X_unlabelled[
+                        np.random.choice(
+                            self.X_unlabelled.shape[0],
+                            self.pool_subsample,
+                            replace=False,
+                        )
+                    ]
                 else:
                     self.X_subsampled = self.X_unlabelled
-            
+
             if self.ret_classifiers and len(classifiers) == 0:
                 # Store the unlabelled pool with the classifier
-                #self.learner.y_unlabelled = self.Y_oracle
-                #self.learner.X_unlabelled = self.X_unlabelled
+                # self.learner.y_unlabelled = self.Y_oracle
+                # self.learner.X_unlabelled = self.X_unlabelled
                 classifiers.append(deepcopy(self.learner))
-            
+
             # Do the active learning!
-            while self.X_unlabelled.shape[0] != 0 and not self.stop_function(self.learner):
-                
+            while self.X_unlabelled.shape[0] != 0 and not self.stop_function(
+                self.learner
+            ):
+
                 self.active_learn_iter(classifiers)
-                
+
         # Write the experiment run results and cleanup intermediate checkpoints
         self._write_run(self.metrics)
         self._cleanup_checkpoint()
-        
+
         return self.metrics
-    
-    
+
     def active_learn_iter(self, classifiers):
         # QUERY  ------------------------------------------------------------------------------------------------------------------------------------------
         t_start = time.monotonic()
@@ -456,25 +504,28 @@ class MyActiveLearner:
             query_idx, query_points = self.learner.query(self.X_subsampled)
             extra_metrics = {}
         else:
-            query_idx, query_points, extra_metrics = self.learner.query(self.X_subsampled)
+            query_idx, query_points, extra_metrics = self.learner.query(
+                self.X_subsampled
+            )
         t_elapsed = time.monotonic() - t_start
 
         # PRE METRICS  -----------------------------------------------------------------------------------------------------------------------------------
 
         t_ee_start = time.monotonic()
-        if any("expected_error" in metric_name if isinstance(metric_name, str) else False for metric_name in self.metrics.metrics):
+        if any(
+            "expected_error" in metric_name if isinstance(metric_name, str) else False
+            for metric_name in self.metrics.metrics
+        ):
             result = self.ee(
-                self.learner, 
-                self.X_subsampled,
-                unique_labels=self.unique_labels
+                self.learner, self.X_subsampled, unique_labels=self.unique_labels
             )
-            extra_metrics['expected_error_min'] = np.min(result)
-            extra_metrics['expected_error_max'] = np.max(result)
-            extra_metrics['expected_error_average'] = np.mean(result)
-            extra_metrics['expected_error_variance'] = np.var(result)
-            
-        extra_metrics['time_ee'] = time.monotonic() - t_ee_start
-            
+            extra_metrics["expected_error_min"] = np.min(result)
+            extra_metrics["expected_error_max"] = np.max(result)
+            extra_metrics["expected_error_average"] = np.mean(result)
+            extra_metrics["expected_error_variance"] = np.var(result)
+
+        extra_metrics["time_ee"] = time.monotonic() - t_ee_start
+
         if "contradictory_information" in self.metrics.metrics:
             # https://stackoverflow.com/questions/32074239/sklearn-getting-distance-of-each-point-from-decision-boundary
             predictions = self.learner.predict(query_points)
@@ -482,7 +533,9 @@ class MyActiveLearner:
 
         # TRAIN  ------------------------------------------------------------------------------------------------------------------------------------------
 
-        if query_points is not None and getattr(self.query_strategy, "is_adversarial", False):
+        if query_points is not None and getattr(
+            self.query_strategy, "is_adversarial", False
+        ):
             self.learner.teach(query_points, self.Y_oracle[query_idx])
 
         self.learner.teach(self.X_unlabelled[query_idx], self.Y_oracle[query_idx])
@@ -490,51 +543,60 @@ class MyActiveLearner:
         # POST METRICS  -----------------------------------------------------------------------------------------------------------------------------------
 
         if "contradictory_information" in self.metrics.metrics:
-            contradictory_information = np.sum(uncertainties[predictions != self.Y_oracle[query_idx]]/np.mean(uncertainties))
-            extra_metrics['contradictory_information'] = contradictory_information
+            contradictory_information = np.sum(
+                uncertainties[predictions != self.Y_oracle[query_idx]]
+                / np.mean(uncertainties)
+            )
+            extra_metrics["contradictory_information"] = contradictory_information
 
         # Replace with non-copying slice?
         if isinstance(self.X_unlabelled, csr_matrix):
-            self.X_unlabelled = delete_from_csr(self.X_unlabelled, row_indices=query_idx)
+            self.X_unlabelled = delete_from_csr(
+                self.X_unlabelled, row_indices=query_idx
+            )
         else:
             self.X_unlabelled = np.delete(self.X_unlabelled, query_idx, axis=0)
 
         self.Y_oracle = np.delete(self.Y_oracle, query_idx, axis=0)
-        
+
         # Resubsample the unlabelled pool. This must happen after we retrain but before metrics are calculated
         # as the subsampled unlabelled pool must be disjoint from the trained instances.
         if self.pool_subsample is not None:
             # TODO: Should this random be seeded?
-            self.X_subsampled = self.X_unlabelled[np.random.choice(self.X_unlabelled.shape[0], min(self.pool_subsample, self.X_unlabelled.shape[0]), replace=False)] 
+            self.X_subsampled = self.X_unlabelled[
+                np.random.choice(
+                    self.X_unlabelled.shape[0],
+                    min(self.pool_subsample, self.X_unlabelled.shape[0]),
+                    replace=False,
+                )
+            ]
         else:
             self.X_subsampled = self.X_unlabelled
-            
-        extra_metrics['time_total'] = time.monotonic() - t_start
+
+        extra_metrics["time_total"] = time.monotonic() - t_start
 
         self.metrics.collect(
             self.metrics.frame.x.iloc[-1] + len(query_idx),
             self.learner.estimator,
             self.Y_test,
             self.X_test,
-            time=t_elapsed, # query time
+            time=t_elapsed,  # query time
             X_unlabelled=self.X_subsampled,
             unique_labels=self.unique_labels,
-            **extra_metrics
+            **extra_metrics,
         )
 
         if self.ret_classifiers:
-            #self.learner.y_unlabelled = self.Y_oracle
-            #self.learner.X_unlabelled = self.X_unlabelled
+            # self.learner.y_unlabelled = self.Y_oracle
+            # self.learner.X_unlabelled = self.X_unlabelled
             classifiers.append(self.learner)
 
         self._checkpoint(self)
-        
-    
+
     def _checkpoint(self, data):
         file = f"{out_dir()}/checkpoints/{self.config_str}_{self.i}.pickle"
         with open(file, "wb") as f:
             dill.dump(data, f)
-
 
     def _restore_checkpoint(self):
         file = f"{out_dir()}/checkpoints/{self.config_str}_{self.i}.pickle"
@@ -544,7 +606,6 @@ class MyActiveLearner:
         except FileNotFoundError:
             return None
 
-
     def _cleanup_checkpoint(self):
         file = f"{out_dir()}/checkpoints/{self.config_str}_{self.i}.pickle"
         try:
@@ -552,12 +613,10 @@ class MyActiveLearner:
         except FileNotFoundError:
             pass
 
-
     def _write_run(self, data):
         file = f"{out_dir()}/runs/{self.config_str}_{self.i}.csv"
         with open(file, "wb") as f:
             pickle.dump(data, f)
-
 
     def _restore_run(self):
         file = f"{out_dir()}/runs/{self.config_str}_{self.i}.csv"
@@ -566,8 +625,8 @@ class MyActiveLearner:
                 return pickle.load(f)
         except FileNotFoundError:
             return None
-    
-    
+
+
 @contextmanager
 def store(filename, enable, restore=False):
     if enable:
@@ -578,44 +637,46 @@ def store(filename, enable, restore=False):
             inner.close()
     else:
         yield None
-        
-    
+
+
 class CompressedStore:
     """
     A compressed, progressively writable, object store. Writes individual objects as files in a zip archive.
     Can be read lazily and iterated/indexed as if it were a container.
-    
+
     During writing use the context manager `store` to ensure all changes are reflected.
     """
-    
-    def __init__(self, filename, restore = False, read = False):
+
+    def __init__(self, filename, restore=False, read=False):
         if read:
-            mode = 'r'
+            mode = "r"
         elif restore:
-            mode = 'a'
+            mode = "a"
         else:
-            mode = 'w'
+            mode = "w"
         self.filename = filename
         self.mode = mode
         try:
-            self.zip = zipfile.ZipFile(self.filename, mode, compression=zipfile.ZIP_DEFLATED)
+            self.zip = zipfile.ZipFile(
+                self.filename, mode, compression=zipfile.ZIP_DEFLATED
+            )
         except Exception as e:
             print(f"Failed to open compressed store {filename}")
             raise e
         self.i = len(self.zip.namelist())
-        
+
     def append(self, obj):
         self.zip.writestr(str(self.i), pickle.dumps(obj))
         assert len(self.zip.namelist()) == self.i + 1
         # To survive unexpected interrupts (from OS, not exceptions) we need to write the zip, then re-open it in append mode.
         # Otherwise changes will be lost because the finalizer doesn't run.
         self.zip.close()
-        self.zip = zipfile.ZipFile(self.filename, 'a', compression=zipfile.ZIP_DEFLATED)
+        self.zip = zipfile.ZipFile(self.filename, "a", compression=zipfile.ZIP_DEFLATED)
         self.i = len(self.zip.namelist())
-        
+
     def __len__(self):
         return self.i
-    
+
     def __getitem__(self, i):
         if isinstance(i, slice):
             if i.start < 0:
@@ -623,43 +684,51 @@ class CompressedStore:
             if i.stop is not None and i.stop < 0:
                 i.stop = self.i - i.stop
             try:
-                return [pickle.Unpickler(self.zip.open(str(x))).load() for x in range(i.start, i.stop or self.i, i.step or 1)]
+                return [
+                    pickle.Unpickler(self.zip.open(str(x))).load()
+                    for x in range(i.start, i.stop or self.i, i.step or 1)
+                ]
             except KeyError:
                 raise IndexError(f"index {i} out of range for store of length {self.i}")
-            
+
         if i < 0:
-            i = self.i-1 - i
+            i = self.i - 1 - i
         try:
             return pickle.Unpickler(self.zip.open(str(i))).load()
         except KeyError:
             raise IndexError(f"index {i} out of range for store of length {self.i}")
-        
+
     # As written this is a single use iterable, create a closure here which keeps an ephemeral counter.
     def __iter__(self):
         i = 0
         while i < self.i:
             yield self[i]
             i += 1
-        
+
     def close(self):
         self.zip.close()
-        
-        
+
     def __getstate__(self):
-        if hasattr(self, 'zip'):
+        if hasattr(self, "zip"):
             odict = self.__dict__.copy()
-            del odict['zip']
+            del odict["zip"]
         return odict
-        
+
     def __setstate__(self, d):
         self.__dict__ = d
-        self.zip = zipfile.ZipFile(self.filename, 'r' if self.mode == 'r' else 'a', compression=zipfile.ZIP_DEFLATED)
+        self.zip = zipfile.ZipFile(
+            self.filename,
+            "r" if self.mode == "r" else "a",
+            compression=zipfile.ZIP_DEFLATED,
+        )
         self.i = len(self.zip.namelist())
-    
-    
+
+
 class BeamClf:
-    def __init__(self, X_labelled, y_labelled, X_unlabelled, y_unlabelled, X_test, y_test):
-        self._ = SVC(kernel='linear', probability=True)
+    def __init__(
+        self, X_labelled, y_labelled, X_unlabelled, y_unlabelled, X_test, y_test
+    ):
+        self._ = SVC(kernel="linear", probability=True)
         self._.fit(X_labelled, y_labelled)
         self.X = X_labelled
         self.y = y_labelled
@@ -669,18 +738,19 @@ class BeamClf:
         self.y_test = y_test
         self.metrics = Metrics()
         self.metrics.collect(len(self.X), self._, self.y_test, self.X_test)
-        
+
     def teach(self, idx):
         self.X = np.concatenate((self.X, [self.X_unlabelled[idx]]), axis=0)
         self.y = np.concatenate((self.y, [self.y_unlabelled[idx]]), axis=0)
         self.X_unlabelled = np.delete(self.X_unlabelled, idx, axis=0)
         self.y_unlabelled = np.delete(self.y_unlabelled, idx, axis=0)
-        
+
         self._.fit(self.X, self.y)
         self.metrics.collect(len(self.X), self._, self.y_test, self.X_test)
-        
+
     def done(self):
         return len(self.X_unlabelled) == 0
+
 
 def beam_search2(
     X_labelled,
@@ -691,15 +761,17 @@ def beam_search2(
     y_test,
     workers: int = 1,
     beam_width: int = 5,
-    metric: str = "accuracy_score"
+    metric: str = "accuracy_score",
 ):
     """
-    Perform beam-search on the split dataset. 
-    
+    Perform beam-search on the split dataset.
+
     This should generate a best-guess at the optimal active learning sequence for a dataset.
     """
-    classifiers = [BeamClf(X_labelled, y_labelled, X_unlabelled, y_unlabelled, X_test, y_test)]
-    
+    classifiers = [
+        BeamClf(X_labelled, y_labelled, X_unlabelled, y_unlabelled, X_test, y_test)
+    ]
+
     while any(not clf.done() for clf in classifiers):
         temp_clfs = []
         for clf in classifiers:
@@ -710,18 +782,25 @@ def beam_search2(
                     new.teach(idx)
                     temp_clfs[-1].append(new)
             else:
+
                 def func(idx):
                     new = deepcopy(clf)
                     new.teach(idx)
                     return new
-                temp_clfs[-1].extend(Parallel(n_jobs=workers)(delayed(lambda i: func(i))(idx) for idx in range(len(clf.X_unlabelled))))
-                
+
+                temp_clfs[-1].extend(
+                    Parallel(n_jobs=workers)(
+                        delayed(lambda i: func(i))(idx)
+                        for idx in range(len(clf.X_unlabelled))
+                    )
+                )
+
         for l in temp_clfs:
             l.sort(key=lambda clf: clf.metrics.frame[metric].iloc[-1], reverse=True)
-        
+
         classifiers = [clf for clf in l for l in temp_clfs][:beam_width]
         temp_clfs = []
-    
+
     return classifiers[0]
 
 
@@ -745,7 +824,7 @@ def delete_from_csr(mat, row_indices=None, col_indices=None):
         row_mask[rows] = False
         col_mask = np.ones(mat.shape[1], dtype=bool)
         col_mask[cols] = False
-        return mat[row_mask][:,col_mask]
+        return mat[row_mask][:, col_mask]
     elif len(rows) > 0:
         mask = np.ones(mat.shape[0], dtype=bool)
         mask[rows] = False
@@ -753,15 +832,15 @@ def delete_from_csr(mat, row_indices=None, col_indices=None):
     elif len(cols) > 0:
         mask = np.ones(mat.shape[1], dtype=bool)
         mask[cols] = False
-        return mat[:,mask]
+        return mat[:, mask]
     else:
         return mat
 
-    
+
 def interactive_img_oracle(images):
     fig, axes = plt.subplots(len(images))
     for i, (ax, image) in enumerate(zip(np.array(axes).flatten(), images)):
-        ax.imshow(image.reshape(8,8), cmap='gray',interpolation='none')
+        ax.imshow(image.reshape(8, 8), cmap="gray", interpolation="none")
         ax.set_xticks(())
         ax.set_yticks(())
         ax.set_title(str(i))
@@ -774,11 +853,14 @@ def interactive_img_oracle(images):
         classes.append(int(klass))
     return np.array(classes)
 
+
 def expected_error(learner, X, predict_proba=None, p_subsample=1.0, unique_labels=None):
-    loss = 'binary'
-    
-    expected_error = np.zeros(shape=(X.shape[0], ))
-    possible_labels = unique_labels if unique_labels is not None else np.unique(learner.y_training)
+    loss = "binary"
+
+    expected_error = np.zeros(shape=(X.shape[0],))
+    possible_labels = (
+        unique_labels if unique_labels is not None else np.unique(learner.y_training)
+    )
 
     X_proba = predict_proba or learner.predict_proba(X)
 
@@ -796,16 +878,25 @@ def expected_error(learner, X, predict_proba=None, p_subsample=1.0, unique_label
                 if isinstance(X, csr_matrix):
                     X_new = scipy.sparse.vstack((learner.X_training, X[[x_idx]]))
                 else:
-                    X_new = data_vstack((learner.X_training, np.expand_dims(X[x_idx], axis=0)))
-            
-                y_new = data_vstack((learner.y_training, np.array(y).reshape(1,)))
+                    X_new = data_vstack(
+                        (learner.X_training, np.expand_dims(X[x_idx], axis=0))
+                    )
+
+                y_new = data_vstack(
+                    (
+                        learner.y_training,
+                        np.array(y).reshape(
+                            1,
+                        ),
+                    )
+                )
 
                 cloned_estimator.fit(X_new, y_new)
                 refitted_proba = cloned_estimator.predict_proba(X_reduced)
-                
+
                 nloss = _proba_uncertainty(refitted_proba)
 
-                expected_error[x_idx] += np.sum(nloss)*X_proba[x_idx, y_idx]
+                expected_error[x_idx] += np.sum(nloss) * X_proba[x_idx, y_idx]
 
         else:
             expected_error[x_idx] = np.inf
@@ -813,17 +904,25 @@ def expected_error(learner, X, predict_proba=None, p_subsample=1.0, unique_label
     return expected_error
 
 
-def expected_error_online(learner, X, predict_proba=None, p_subsample=1.0, unique_labels=None):
-    loss = 'binary'
-    
-    expected_error = np.zeros(shape=(X.shape[0], ))
-    possible_labels = unique_labels if unique_labels is not None else np.unique(learner.y_training)
+def expected_error_online(
+    learner, X, predict_proba=None, p_subsample=1.0, unique_labels=None
+):
+    loss = "binary"
+
+    expected_error = np.zeros(shape=(X.shape[0],))
+    possible_labels = (
+        unique_labels if unique_labels is not None else np.unique(learner.y_training)
+    )
 
     X_proba = predict_proba or learner.predict_proba(X)
 
-    base_estimator = sklearn.linear_model.SGDClassifier(loss='hinge', penalty='l2', eta0=0.1, learning_rate='constant')
+    base_estimator = sklearn.linear_model.SGDClassifier(
+        loss="hinge", penalty="l2", eta0=0.1, learning_rate="constant"
+    )
     # TODO: Multiple epochs?
-    base_estimator.partial_fit(learner.X_training, learner.y_training, classes=possible_labels)
+    base_estimator.partial_fit(
+        learner.X_training, learner.y_training, classes=possible_labels
+    )
 
     for x_idx in range(X.shape[0]):
         # subsample the data if needed
@@ -834,40 +933,40 @@ def expected_error_online(learner, X, predict_proba=None, p_subsample=1.0, uniqu
                 X_reduced = np.delete(X, x_idx, axis=0)
             # estimate the expected error
             for y_idx, y in enumerate(possible_labels):
-                #raise Exception(y)
+                # raise Exception(y)
                 cloned_estimator = deepcopy(base_estimator)
                 cloned_estimator.partial_fit(X[[x_idx]], [y])
-                
-                #calibrated_estimator = calibration.CalibratedClassifierCV(
+
+                # calibrated_estimator = calibration.CalibratedClassifierCV(
                 #    # is eta=0.1 right?
                 #    # https://stackoverflow.com/questions/23056460/does-the-svm-in-sklearn-support-incremental-online-learning
                 #    base_estimator=cloned_estimator,
                 #    ensemble=False,
                 #    cv='prefit'
-                #)
-                
-                refitted_proba = cloned_estimator.decision_function(X_reduced)
-                
-                nloss = refitted_proba #_proba_uncertainty(refitted_proba)
-                
-                #assert (nloss>=0).all() and (nloss<=1).all()
+                # )
 
-                expected_error[x_idx] += np.sum(np.abs(nloss))*X_proba[x_idx, y_idx]
+                refitted_proba = cloned_estimator.decision_function(X_reduced)
+
+                nloss = refitted_proba  # _proba_uncertainty(refitted_proba)
+
+                # assert (nloss>=0).all() and (nloss<=1).all()
+
+                expected_error[x_idx] += np.sum(np.abs(nloss)) * X_proba[x_idx, y_idx]
 
         else:
             expected_error[x_idx] = np.inf
 
-    assert (expected_error<10000).all() and (expected_error>=0).all()
+    assert (expected_error < 10000).all() and (expected_error >= 0).all()
     return expected_error
 
 
-def csr_vappend(a,b):
-    """ Takes in 2 csr_matrices and appends the second one to the bottom of the first one. 
+def csr_vappend(a, b):
+    """Takes in 2 csr_matrices and appends the second one to the bottom of the first one.
     Much faster than scipy.sparse.vstack but assumes the type to be csr and overwrites
     the first matrix instead of copying it. The data, indices, and indptr still get copied."""
 
-    a.data = np.hstack((a.data,b.data))
-    a.indices = np.hstack((a.indices,b.indices))
-    a.indptr = np.hstack((a.indptr,(b.indptr + a.nnz)[1:]))
-    a._shape = (a.shape[0]+b.shape[0],b.shape[1])
+    a.data = np.hstack((a.data, b.data))
+    a.indices = np.hstack((a.indices, b.indices))
+    a.indptr = np.hstack((a.indptr, (b.indptr + a.nnz)[1:]))
+    a._shape = (a.shape[0] + b.shape[0], b.shape[1])
     return a

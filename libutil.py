@@ -9,11 +9,7 @@ from art.metrics import empirical_robustness
 from art.estimators.classification.scikitlearn import ScikitlearnSVC
 
 
-COLORS = ["#56ad94",
-"#8f56cf",
-"#365300",
-"#a96aa5",
-"#bf6148"]
+COLORS = ["#56ad94", "#8f56cf", "#365300", "#a96aa5", "#bf6148"]
 
 
 class ProgressParallel(Parallel):
@@ -60,17 +56,21 @@ class Metrics:
             }
         )
 
-    def collect(self, x, clf, labels, test_set, X_unlabelled=None, unique_labels=None, **kwargs):
+    def collect(
+        self, x, clf, labels, test_set, X_unlabelled=None, unique_labels=None, **kwargs
+    ):
         """
         Collect metrics from the classifier using a particular test set and marking the point at x.
         """
 
         result = {}
-        unique_labels = unique_labels if unique_labels is not None else np.unique(labels)
-            
+        unique_labels = (
+            unique_labels if unique_labels is not None else np.unique(labels)
+        )
+
         predict = clf.predict(test_set)
         predict_proba = clf.predict_proba(test_set)
-        
+
         for metric in self.metrics:
             if metric == f1_score:
                 result[metric.__name__] = f1_score(
@@ -85,9 +85,7 @@ class Metrics:
                         labels, predict_proba, multi_class="ovr"
                     )
                 else:
-                    result[metric.__name__] = roc_auc_score(
-                        labels, predict_proba[:, 1]
-                    )
+                    result[metric.__name__] = roc_auc_score(labels, predict_proba[:, 1])
             elif metric == empirical_robustness:
                 result[metric.__name__] = empirical_robustness(
                     ScikitlearnSVC(clf), test_set, "fgsm", attack_params={"eps": 0.2}
@@ -116,15 +114,15 @@ class Metrics:
         sem = merged.groupby(merged.index).sem()
         sem.columns = [str(col) + "_stderr" for col in sem.columns]
         return pd.concat([averaged, sem], axis=1)
-    
-    
+
+
 def average(frame, others):
     merged = pd.concat([frame] + [other for other in others])
     averaged = merged.groupby(merged.index).mean()
     sem = merged.groupby(merged.index).sem()
     sem.columns = [str(col) + "_stderr" for col in sem.columns]
     return pd.concat([averaged, sem], axis=1)
-    
+
 
 def run_from_ipython():
     try:
@@ -135,28 +133,31 @@ def run_from_ipython():
 
 
 def out_dir():
-    return os.environ['OUT_DIR']
+    return os.environ["OUT_DIR"]
+
 
 def dataset_dir():
-    return os.environ['DATASET_DIR']
+    return os.environ["DATASET_DIR"]
 
 
 def get_mutator(name: str):
     from nesi_bias import bias
-    
+
     if name.startswith("noise"):
         from nesi_noise import noise
-        amount = int(name[5:])*1e-2
+
+        amount = int(name[5:]) * 1e-2
         return partial(noise, amount=amount)
     if name.startswith("unbalanced2"):
         from nesi_unbalanced import unbalanced2
-        amount = int(name.split('-')[1])*1e-2
+
+        amount = int(name.split("-")[1]) * 1e-2
         return partial(unbalanced2, amount=amount)
     if name.startswith("bias"):
         raise Exception("bias mutator getting not implemented")
     raise Exception(f"unknown mutator {name}")
-    
-    
+
+
 # Source:
 # https://stackoverflow.com/questions/12377013/is-there-a-library-function-in-python-to-turn-a-generator-function-into-a-functi
 def listify(fn=None, wrapper=list):
@@ -182,11 +183,14 @@ def listify(fn=None, wrapper=list):
         >>> get_lengths_tuple(["foo", "bar"])
         (3, 3)
     """
+
     def listify_return(fn):
         @wraps(fn)
         def listify_helper(*args, **kw):
             return wrapper(fn(*args, **kw))
+
         return listify_helper
+
     if fn is None:
         return listify_return
     return listify_return(fn)

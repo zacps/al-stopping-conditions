@@ -19,40 +19,33 @@ matrix = {
     # Lambda wrapper required for function to be pickleable (sent to other threads via joblib)
     "datasets": [
         # Text classification
-        
         ("newsgroups", wrap(newsgroups, None)),
-    
         ("rcv1", wrap(rcv1, None)),
         ("webkb", wrap(webkb, None)),
         ("spamassassin", wrap(spamassassin, None)),
-        
         # Image classification
         ("cifar10", wrap(cifar10, None)),
         ("quickdraw", wrap(quickdraw, None)),
         ("avila", wrap(avila, None)),
-        
         # General
         ("shuttle", wrap(shuttle, None)),
-        #("covertype", wrap(covertype, None)), # fit takes a million years (1233s for 1000 instances)
+        # ("covertype", wrap(covertype, None)), # fit takes a million years (1233s for 1000 instances)
         ("smartphone", wrap(smartphone, None)),
         ("htru2", wrap(htru2, None)),
-        #("malware", wrap(malware, None)), # MALWARE FIT DID NOT FINISH (07:30:30.xxx CPU time)
+        # ("malware", wrap(malware, None)), # MALWARE FIT DID NOT FINISH (07:30:30.xxx CPU time)
         ("bidding", wrap(bidding, None)),
         ("swarm", wrap(swarm, None)),
         ("bank", wrap(bank, None)),
-        ("buzz", wrap(buzz, None)), # Slow fit times
+        ("buzz", wrap(buzz, None)),  # Slow fit times
         ("sensorless", wrap(sensorless, None)),
         ("dota2", wrap(dota2, None)),
-        
         # Bio
         ("abalone", wrap(abalone, None)),
         ("splice", wrap(splice, None)),
         ("anuran", wrap(anuran, None)),
-        
         # Medical
         ("cardio", wrap(cardio, None)),
         ("skin", wrap(skin, None)),
-        
     ],
     "dataset_mutators": {
         "none": (lambda *x, **kwargs: x),
@@ -60,9 +53,7 @@ matrix = {
     "methods": [
         ("uncertainty", partial(uncertainty_stop, n_instances=10)),
     ],
-    "models": [
-        "svm-linear"
-    ],
+    "models": ["svm-linear"],
     "meta": {
         "dataset_size": 1000,
         "labelled_size": 10,
@@ -72,9 +63,12 @@ matrix = {
         "ensure_y": True,
         "stop_info": True,
         "aggregate": False,
-        "stop_function": ("len1000", lambda learner: learner.y_training.shape[0] >= 1000),
-        "pool_subsample": 1000
-    }
+        "stop_function": (
+            "len1000",
+            lambda learner: learner.y_training.shape[0] >= 1000,
+        ),
+        "pool_subsample": 1000,
+    },
 }
 
 capture_metrics = [
@@ -84,7 +78,6 @@ capture_metrics = [
     "time",
     "time_total",
     "time_ee",
-    
     "uncertainty_average",
     "uncertainty_min",
     "uncertainty_max",
@@ -103,16 +96,17 @@ capture_metrics = [
     "expected_error_variance",
 ]
 
+
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument('fragment_id', type=int)
-    parser.add_argument('fragment_length', type=int)
-    parser.add_argument('fragment_run')
-    parser.add_argument('--dry-run', action='store_true')
+    parser.add_argument("fragment_id", type=int)
+    parser.add_argument("fragment_length", type=int)
+    parser.add_argument("fragment_run")
+    parser.add_argument("--dry-run", action="store_true")
 
     args = parser.parse_args()
 
-    fragment_run = args.fragment_run.split('-')
+    fragment_run = args.fragment_run.split("-")
     start = int(fragment_run[0])
     if len(fragment_run) == 2:
         end = int(fragment_run[1])
@@ -120,14 +114,14 @@ def main():
         end = None
 
     librun.run(
-        matrix, 
+        matrix,
         metrics=capture_metrics,
-        #abort=False,
+        # abort=False,
         fragment_id=args.fragment_id,
         fragment_length=args.fragment_length,
         fragment_run_start=start,
         fragment_run_end=end,
-        dry_run=args.dry_run
+        dry_run=args.dry_run,
     )
 
 

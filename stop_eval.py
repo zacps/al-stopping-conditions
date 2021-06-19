@@ -3,7 +3,9 @@ import librun
 import libstop
 from libadversarial import uncertainty_stop
 from libstop import rank_stop_conds
-from dotenv import load_dotenv; load_dotenv();
+from dotenv import load_dotenv
+
+load_dotenv()
 
 matrix = {
     # Dataset fetchers should cache if possible
@@ -39,9 +41,12 @@ matrix = {
         "ensure_y": True,
         "stop_info": True,
         "aggregate": False,
-        "stop_function": ("len1000", lambda learner: learner.y_training.shape[0] >= 1000),
-        "pool_subsample": 1000
-    }
+        "stop_function": (
+            "len1000",
+            lambda learner: learner.y_training.shape[0] >= 1000,
+        ),
+        "pool_subsample": 1000,
+    },
 }
 
 results = librun.run(matrix, force_cache=True, fragment_run_start=0, fragment_run_end=9)
@@ -53,23 +58,26 @@ for plots, clfs in zip(results_plots, classifiers):
     for i, clfs_ in enumerate(clfs):
         if len(clfs_) != 100:
             raise Exception(f"{plots[0].serialize()}_{i}.zip")
-            
-params = {
-    "kappa": {"k": 2}
-}
+
+params = {"kappa": {"k": 2}}
 conditions = {
-    **{f"{f.__name__}": partial(f, **params.get(f.__name__, {})) for f in [
-        uncertainty_min, 
-        SC_entropy_mcs, 
-        SC_oracle_acc_mcs, 
-        SC_mes,
-        EVM, 
-        #ZPS_ee_grad, 
-        stabilizing_predictions
-    ]},
+    **{
+        f"{f.__name__}": partial(f, **params.get(f.__name__, {}))
+        for f in [
+            uncertainty_min,
+            SC_entropy_mcs,
+            SC_oracle_acc_mcs,
+            SC_mes,
+            EVM,
+            # ZPS_ee_grad,
+            stabilizing_predictions,
+        ]
+    },
     "ZPS2": partial(ZPS, order=2),
-    "SSNCut": SSNCut
+    "SSNCut": SSNCut,
 }
 
-            
-stop_conditions, stop_results = libstop.eval_stopping_conditions(results_plots, classifiers, conditions=conditions)
+
+stop_conditions, stop_results = libstop.eval_stopping_conditions(
+    results_plots, classifiers, conditions=conditions
+)

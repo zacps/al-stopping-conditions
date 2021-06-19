@@ -230,7 +230,7 @@ def align_yaxis(ax1, ax2):
     """Align zeros of the two axes, zooming them out by same ratio"""
     axes = np.array([ax1, ax2])
     extrema = np.array([ax.get_ylim() for ax in axes])
-    tops = extrema[:,1] / (extrema[:,1] - extrema[:,0])
+    tops = extrema[:, 1] / (extrema[:, 1] - extrema[:, 0])
     # Ensure that plots (intervals) are ordered bottom to top:
     if tops[0] > tops[1]:
         axes, extrema, tops = [a[::-1] for a in (axes, extrema, tops)]
@@ -238,11 +238,11 @@ def align_yaxis(ax1, ax2):
     # How much would the plot overflow if we kept current zoom levels?
     tot_span = tops[1] + 1 - tops[0]
 
-    extrema[0,1] = extrema[0,0] + tot_span * (extrema[0,1] - extrema[0,0])
-    extrema[1,0] = extrema[1,1] + tot_span * (extrema[1,0] - extrema[1,1])
+    extrema[0, 1] = extrema[0, 0] + tot_span * (extrema[0, 1] - extrema[0, 0])
+    extrema[1, 0] = extrema[1, 1] + tot_span * (extrema[1, 0] - extrema[1, 1])
     [axes[i].set_ylim(*extrema[i]) for i in range(2)]
 
-    
+
 # ----------------------------------------------------------------------------------------------
 # Paraeto plots
 # ----------------------------------------------------------------------------------------------
@@ -254,12 +254,12 @@ import seaborn as sns
 
 def _get_frontier(res):
     "find pareto-optima"
-    tmp = np.column_stack((res[:,0], 1-res[:,1]))
+    tmp = np.column_stack((res[:, 0], 1 - res[:, 1]))
     frontier = np.ones(len(tmp))
     for i in range(len(tmp)):
         for r2 in tmp:
             if all(r2 <= tmp[i]) and any(r2 < tmp[i]):
-                frontier[i] = 0 # res[i] is dominated by r2!
+                frontier[i] = 0  # res[i] is dominated by r2!
                 break
     return frontier.astype(int)
 
@@ -267,48 +267,67 @@ def _get_frontier(res):
 def plot_paraeto_hull(results):
     datasets = list(results.keys())
     criteria = list(results[datasets[0]].keys())
-    katmap = sns.color_palette('gist_ncar', 7)
-    markers = ['s', 'v', '^', '*', 'D', 'P', 'o']
-    
-    fig, ax = plt.subplots(3,3, figsize=(15,15))
+    katmap = sns.color_palette("gist_ncar", 7)
+    markers = ["s", "v", "^", "*", "D", "P", "o"]
+
+    fig, ax = plt.subplots(3, 3, figsize=(15, 15))
     for ds in range(len(datasets)):
-        r = int(ds) // 3 # div
-        c = int(ds) % 3 # mod
-        
+        r = int(ds) // 3  # div
+        c = int(ds) % 3  # mod
+
         res_name = results[datasets[ds]]
-        res_name_f = np.empty((0,2))
-        sc_name = np.empty(0).astype('int')
+        res_name_f = np.empty((0, 2))
+        sc_name = np.empty(0).astype("int")
 
         for sc, res in res_name.items():
-            #res_anu_avg = np.row_stack((res_anu_avg, np.nanmean(np.array(res, dtype=np.float), axis=0)[0:2]))
-            res_name_f = np.concatenate((res_name_f, np.array(res, dtype=np.float)[:,0:2]))
-            sc_name = np.append(sc_name, np.array([criteria.index(sc)]*len(res)))
+            # res_anu_avg = np.row_stack((res_anu_avg, np.nanmean(np.array(res, dtype=np.float), axis=0)[0:2]))
+            res_name_f = np.concatenate(
+                (res_name_f, np.array(res, dtype=np.float)[:, 0:2])
+            )
+            sc_name = np.append(sc_name, np.array([criteria.index(sc)] * len(res)))
 
         pareto_front = res_name_f[_get_frontier(res_name_f) == 1]
-        pareto_front = pareto_front[pareto_front[:,0].argsort()]
+        pareto_front = pareto_front[pareto_front[:, 0].argsort()]
 
-        ax[r,c].plot(pareto_front[:,0], pareto_front[:,1], c='#3D6AE0')
-        for i in range(max(sc_name)+1):
-            #c = '#E0A33D' if i==6 else 'black'
+        ax[r, c].plot(pareto_front[:, 0], pareto_front[:, 1], c="#3D6AE0")
+        for i in range(max(sc_name) + 1):
+            # c = '#E0A33D' if i==6 else 'black'
             col = [katmap[i]]
-            points = res_name_f[sc_name==i]
+            points = res_name_f[sc_name == i]
             points = points[~np.isnan(points).any(axis=1)]
 
-            if len(points)>0:
-                if len(np.unique(points[:,0]))>1 and len(np.unique(points[:,1]))>1:
+            if len(points) > 0:
+                if (
+                    len(np.unique(points[:, 0])) > 1
+                    and len(np.unique(points[:, 1])) > 1
+                ):
                     hull = ConvexHull(points)
-                    x_hull = np.append(points[hull.vertices, 0], points[hull.vertices, 0][0])
-                    y_hull = np.append(points[hull.vertices, 1], points[hull.vertices, 1][0])
-                    ax[r,c].fill(x_hull, y_hull, alpha=0.3, c=col[0])
+                    x_hull = np.append(
+                        points[hull.vertices, 0], points[hull.vertices, 0][0]
+                    )
+                    y_hull = np.append(
+                        points[hull.vertices, 1], points[hull.vertices, 1][0]
+                    )
+                    ax[r, c].fill(x_hull, y_hull, alpha=0.3, c=col[0])
                 else:
-                    ax[r,c].plot(points[:,0], points[:,1], c=col[0], linewidth=1)
+                    ax[r, c].plot(points[:, 0], points[:, 1], c=col[0], linewidth=1)
 
-            s = 40 if i==6 else 20
-            ax[r,c].scatter(res_name_f[sc_name==i,0], res_name_f[sc_name==i,1], c=col, s=s, marker=markers[i], 
-                        zorder=3, label=criteria[i])
-        ax[r,c].plot(pareto_front[:,0], pareto_front[:,1], c='#3D6AE0')
-        if r==2: ax[r,c].set_xlabel('# Instances')
-        if c==0: ax[r,c].set_ylabel('Accuracy')
-        if ds==8: ax[r,c].legend()
-        ax[r,c].set_title(datasets[ds])
+            s = 40 if i == 6 else 20
+            ax[r, c].scatter(
+                res_name_f[sc_name == i, 0],
+                res_name_f[sc_name == i, 1],
+                c=col,
+                s=s,
+                marker=markers[i],
+                zorder=3,
+                label=criteria[i],
+            )
+        ax[r, c].plot(pareto_front[:, 0], pareto_front[:, 1], c="#3D6AE0")
+        if r == 2:
+            ax[r, c].set_xlabel("# Instances")
+        if c == 0:
+            ax[r, c].set_ylabel("Accuracy")
+        if ds == 8:
+            ax[r, c].legend()
+        ax[r, c].set_title(datasets[ds])
     plt.show()

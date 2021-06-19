@@ -18,12 +18,12 @@ from joblib import Parallel, delayed
 from scipy.sparse import csr_matrix
 
 try:
-    #from secml.ml.classifiers.sklearn.c_classifier_svm import CClassifierSVM
-    #from secml.adv.attacks.poisoning import CAttackPoisoningSVM
-    #from secml.ml.kernels.c_kernel_linear import CKernelLinear
-    #from secml.data.c_dataset import CDataset
-    #from secml.data.data_utils import label_binarize_onehot
-    #from secml.array.c_array import CArray
+    # from secml.ml.classifiers.sklearn.c_classifier_svm import CClassifierSVM
+    # from secml.adv.attacks.poisoning import CAttackPoisoningSVM
+    # from secml.ml.kernels.c_kernel_linear import CKernelLinear
+    # from secml.data.c_dataset import CDataset
+    # from secml.data.data_utils import label_binarize_onehot
+    # from secml.array.c_array import CArray
     pass
 except ImportError:
     pass
@@ -53,13 +53,9 @@ def uncertainty_id(clf, X, n_instances=1, **kwargs):
     )[:n_instances]
 
 
-def uncertainty_randomised(
-    clf,
-    X,
-    n_instances
-):
-    idx, _ = batch.uncertainty_batch_sampling(clf, X, n_instances*2)
-    
+def uncertainty_randomised(clf, X, n_instances):
+    idx, _ = batch.uncertainty_batch_sampling(clf, X, n_instances * 2)
+
     # -------------------------------------------------------------------------------------
     # Differs from non randomised strategy in that we take the top 2*n_instances points and
     # randomly pick n_instances of them.
@@ -73,31 +69,48 @@ def uncertainty_stop(
     clf,
     X,
     n_instances,
-    metric = 'euclidean',
+    metric="euclidean",
     n_jobs=1,
     **uncertainty_measure_kwargs,
 ):
     from modAL.batch import ranked_batch
     from modAL.uncertainty import classifier_uncertainty, classifier_entropy
-    
+
     if n_jobs == 1:
         uncertainty = classifier_uncertainty(clf, X, **uncertainty_measure_kwargs)
         entropy = classifier_entropy(clf, X, **uncertainty_measure_kwargs)
     else:
-        uncertainty = np.concatenate(np.array(Parallel()(delayed(classifier_uncertainty)(
-            clf, 
-            chunk, 
-            **uncertainty_measure_kwargs
-        ) for chunk in np.array_split(X, n_jobs))), axis=0)
-        entropy = np.concatenate(np.array(Parallel()(delayed(classifier_entropy)(
-            clf, 
-            chunk, 
-            **uncertainty_measure_kwargs
-        ) for chunk in np.array_split(X, n_jobs))), axis=0)
-        
-    
-    query_indices = ranked_batch(clf, unlabeled=X, uncertainty_scores=uncertainty,
-         n_instances=n_instances, metric=metric, n_jobs=n_jobs)
+        uncertainty = np.concatenate(
+            np.array(
+                Parallel()(
+                    delayed(classifier_uncertainty)(
+                        clf, chunk, **uncertainty_measure_kwargs
+                    )
+                    for chunk in np.array_split(X, n_jobs)
+                )
+            ),
+            axis=0,
+        )
+        entropy = np.concatenate(
+            np.array(
+                Parallel()(
+                    delayed(classifier_entropy)(
+                        clf, chunk, **uncertainty_measure_kwargs
+                    )
+                    for chunk in np.array_split(X, n_jobs)
+                )
+            ),
+            axis=0,
+        )
+
+    query_indices = ranked_batch(
+        clf,
+        unlabeled=X,
+        uncertainty_scores=uncertainty,
+        n_instances=n_instances,
+        metric=metric,
+        n_jobs=n_jobs,
+    )
     metrics = {
         "uncertainty_average": np.mean(uncertainty),
         "uncertainty_average_selected": np.mean(uncertainty[query_indices]),
@@ -110,6 +123,7 @@ def uncertainty_stop(
         "entropy_max": np.max(entropy),
     }
     return query_indices, X[query_indices], metrics
+
 
 # deprecated
 def fgm(
@@ -177,7 +191,7 @@ def adversarial(
     teach_adversarial: bool = False,
     parallel_threads: int = 1,
     use_logits: bool = False,
-    log_metrics = None,
+    log_metrics=None,
     distance_metric: str = "euclidean",
     **attack_kwargs,
 ):
@@ -193,12 +207,10 @@ def adversarial(
         )
     except TypeError:
         # use_logits patch not yet merged
-        classifier = ScikitlearnSVC(
-            model=classifier.estimator, clip_values=clip_values
-        )
+        classifier = ScikitlearnSVC(model=classifier.estimator, clip_values=clip_values)
 
     attack = Attack(classifier, **attack_kwargs)
-    
+
     if isinstance(X, csr_matrix):
         X = X.toarray()
 
@@ -215,11 +227,11 @@ def adversarial(
 
     # TODO: Investigate performance of different distance metrics
     dists = paired_distances(X, adversarial_examples, metric=distance_metric)
-    
+
     if log_metrics is not None:
         met = [np.min(dists), np.mean(dists), np.max(dists)]
         print(met)
-        log_metrics.write(str(met)+"\n")
+        log_metrics.write(str(met) + "\n")
 
     idx = np.argsort(dists)
 
@@ -255,19 +267,19 @@ def adversarial_randomised(
         )
     except TypeError:
         # use_logits patch not yet merged
-        classifier = ScikitlearnSVC(
-            model=classifier.estimator, clip_values=clip_values
-        )
+        classifier = ScikitlearnSVC(model=classifier.estimator, clip_values=clip_values)
 
     attack = Attack(classifier, **attack_kwargs)
 
     if parallel_threads != 1:
         # *Should* be ordered, at least with the default backend
         # multiprocessing backend may not be ordered
-        adversarial_examples = np.array(Parallel(n_jobs=parallel_threads)(
-            delayed(attack.generate)(part)
-            for part in np.array_split(X, parallel_threads)
-        ))
+        adversarial_examples = np.array(
+            Parallel(n_jobs=parallel_threads)(
+                delayed(attack.generate)(part)
+                for part in np.array_split(X, parallel_threads)
+            )
+        )
         print("type ", type(adversarial_examples[0]))
         adversarial_examples = adversarial_examples.reshape(-1, X.shape[-1])
     else:
@@ -276,11 +288,15 @@ def adversarial_randomised(
     dists = paired_distances(X, adversarial_examples, metric="euclidean")
 
     idx = np.argsort(dists)
-    
+
     # -------------------------------------------------------------------------------------
     # Differs from non randomised strategy in that we take the top 2*n_instances points and
     # randomly pick n_instances of them.
-    idx = np.random.choice(idx[:min(2*n_instances, len(idx))], min(n_instances, 2*n_instances, len(idx)), replace=False)
+    idx = np.random.choice(
+        idx[: min(2 * n_instances, len(idx))],
+        min(n_instances, 2 * n_instances, len(idx)),
+        replace=False,
+    )
     # -------------------------------------------------------------------------------------
 
     # This is kind of a hack, modAL is not built to deal with passing extra information.
@@ -291,19 +307,19 @@ def adversarial_randomised(
 
     return result
 
-def adversarial_batch_sampling(classifier,
-                               X: Union[np.ndarray],
-                               Attack: Callable,
-                               n_instances: int = 20,
-                               metric: Union[str, Callable] = 'euclidean',
-                               n_jobs: Optional[int] = None,
-                               clip_values = None
-                               ) -> np.ndarray:
+
+def adversarial_batch_sampling(
+    classifier,
+    X: Union[np.ndarray],
+    Attack: Callable,
+    n_instances: int = 20,
+    metric: Union[str, Callable] = "euclidean",
+    n_jobs: Optional[int] = None,
+    clip_values=None,
+) -> np.ndarray:
     from modAL.batch import ranked_batch
-    
-    aclassifier = ScikitlearnSVC(
-        model=classifier.estimator, clip_values=clip_values
-    )
+
+    aclassifier = ScikitlearnSVC(model=classifier.estimator, clip_values=clip_values)
 
     attack = Attack(aclassifier)
 
@@ -312,10 +328,17 @@ def adversarial_batch_sampling(classifier,
     # TODO: Investigate performance of different distance metrics
     dists = paired_distances(X, adversarial_examples, metric="euclidean")
 
-    norm_dists = 1-dists/np.max(dists)
-    
-    return ranked_batch(classifier, unlabeled=X, uncertainty_scores=norm_dists,
-                                 n_instances=n_instances, metric=metric, n_jobs=n_jobs)
+    norm_dists = 1 - dists / np.max(dists)
+
+    return ranked_batch(
+        classifier,
+        unlabeled=X,
+        uncertainty_scores=norm_dists,
+        n_instances=n_instances,
+        metric=metric,
+        n_jobs=n_jobs,
+    )
+
 
 def density(
     classifier: sklearn.base.BaseEstimator,
@@ -596,6 +619,7 @@ def uncertainty_synthesis(
 
     return (None, out, None, None, None, None)
 
+
 def halfspace_synthesis(
     classifier: sklearn.base.BaseEstimator,
     X: Union[list, np.ndarray],
@@ -608,67 +632,68 @@ def halfspace_synthesis(
     """
     This implementation is ported from the official matlab implementation [1] and is hence
     a derivative work. Licensing is unclear, however the source states:
-    
+
     > The software below is for scientific purpose ONLY.
-    
+
     [1](https://mine.kaust.edu.sa/Pages/Software.aspx)
     """
     # TODO: Change this if necessary to make use of warm start.
-    
-    y_training = (y_training - 0.5)*2
-    
-    assert(set(np.unique(y_training)) == {-1, 1})
-    
+
+    y_training = (y_training - 0.5) * 2
+
+    assert set(np.unique(y_training)) == {-1, 1}
+
     import cvxpy
     import scipy
-    
+
     d = X_training.shape[-1]
     m = X_training.shape[0]
-    
+
     s = cvxpy.Variable((d, 1))
     u = cvxpy.Variable(d)
-    
+
     objective = cvxpy.Maximize(cvxpy.geo_mean(s))
-    
+
     constraints = [
-        cvxpy.diag(y_training) @ 
-        ( X_training @ u) 
-        >= 
-        cvxpy.norm(
+        cvxpy.diag(y_training) @ (X_training @ u)
+        >= cvxpy.norm(
             cvxpy.multiply(
                 X_training,
-                (np.ones((m, 1))@cvxpy.transpose(s)),
-            ), 2, 1
+                (np.ones((m, 1)) @ cvxpy.transpose(s)),
+            ),
+            2,
+            1,
         ),
-        cvxpy.norm(u)<=1
+        cvxpy.norm(u) <= 1,
     ]
     problem = cvxpy.Problem(objective, constraints)
-    
+
     result = problem.solve(solver=cvxpy.MOSEK)
 
     w_est = u.value
-        
-    S = np.diag(np.squeeze(s.value.T)) # the square root of the covariance matrix 
+
+    S = np.diag(np.squeeze(s.value.T))  # the square root of the covariance matrix
     N = scipy.linalg.null_space(np.asmatrix(u.value.conj().T))
     B = np.matmul(S, N)
     B = np.matmul(B.conj().T, B)
-    
+
     with warnings.catch_warnings():
-        warnings.filterwarnings('ignore', category=RuntimeWarning)
-        eigs = scipy.sparse.linalg.eigs(B, n_instances, which='LM')
-    
+        warnings.filterwarnings("ignore", category=RuntimeWarning)
+        eigs = scipy.sparse.linalg.eigs(B, n_instances, which="LM")
+
     _, alph = eigs
     X_next = (np.matmul(N, alph)).conj().T
-    assert(not np.iscomplex(X_next).all())
-    
+    assert not np.iscomplex(X_next).all()
+
     X_next = np.real(X_next)
 
     # expose w_est?
-    
+
     return (None, X_next, None, None, None, None)
 
 
 __engine = None
+
 
 def halfspace_synthesis_matlab(
     classifier: sklearn.base.BaseEstimator,
@@ -681,19 +706,20 @@ def halfspace_synthesis_matlab(
 ):
     """
     This function is licensed under GPLv2 the same as the rest of the repository, however it calls into ambiguously licensed code.
-    
+
     See the documentation for `halfspace_synthesis` for details.
     """
     global __engine
-    
+
     import matlab.engine
     from matlab_ffi import as_matlab
-    
+
     if __engine is None:
         __engine = matlab.engine.start_matlab()
 
-    __engine.addpath(fr'{Path(__file__).resolve().parent}/matlab', nargout=0)
-    X_next, w_est = __engine.halfspace_query_synthesis(as_matlab(X_training), as_matlab((y_training-0.5)*2), n_instances, nargout=2)
-    
+    __engine.addpath(fr"{Path(__file__).resolve().parent}/matlab", nargout=0)
+    X_next, w_est = __engine.halfspace_query_synthesis(
+        as_matlab(X_training), as_matlab((y_training - 0.5) * 2), n_instances, nargout=2
+    )
+
     return (None, X_next, None, None, None, None)
-    

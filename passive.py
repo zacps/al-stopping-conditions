@@ -9,18 +9,25 @@ import scipy
 from libutil import out_dir
 import os
 import libdatasets
-from dotenv import load_dotenv; load_dotenv()
+from dotenv import load_dotenv
+
+load_dotenv()
+
 
 def eval_one(results, name, dataset, run, fname):
     print(f"  {run}")
     if run in results.keys():
         return (run, results[run])
 
-    X,y = dataset()
+    X, y = dataset()
 
     X_labelled, X_unlabelled, y_labelled, y_oracle, X_test, y_test = active_split(
-        X, y, labeled_size=10, test_size=0.5, random_state=check_random_state(run), ensure_y=True
-
+        X,
+        y,
+        labeled_size=10,
+        test_size=0.5,
+        random_state=check_random_state(run),
+        ensure_y=True,
     )
     if isinstance(X_labelled, scipy.sparse.csr_matrix):
         X = scipy.sparse.vstack((X_labelled, X_unlabelled))
@@ -28,20 +35,16 @@ def eval_one(results, name, dataset, run, fname):
         X = np.concatenate((X_labelled, X_unlabelled))
     y = np.concatenate((y_labelled, y_oracle))
 
-    clf = SVC(probability=True, kernel='linear')
+    clf = SVC(probability=True, kernel="linear")
     clf.fit(X, y)
     predicted = clf.predict(X_test)
     predict_proba = clf.predict_proba(X_test)
     unique_labels = np.unique(y_labelled)
 
     if len(unique_labels) > 2 or len(unique_labels.shape) > 1:
-        roc_auc = roc_auc_score(
-            y_test, predict_proba, multi_class="ovr"
-        )
+        roc_auc = roc_auc_score(y_test, predict_proba, multi_class="ovr")
     else:
-        roc_auc = roc_auc_score(
-            y_test, predict_proba[:, 1]
-    )
+        roc_auc = roc_auc_score(y_test, predict_proba[:, 1])
 
     result = [
         accuracy_score(y_test, predicted),
@@ -51,15 +54,16 @@ def eval_one(results, name, dataset, run, fname):
             average="micro" if len(unique_labels) > 2 else "binary",
             pos_label=unique_labels[1] if len(unique_labels) <= 2 else 1,
         ),
-        roc_auc
+        roc_auc,
     ]
 
     return (run, result)
-    
+
+
 def run_passive(datasets, runs):
     all_results = {}
     for name, dataset in datasets:
-        if name == 'newsgroups':
+        if name == "newsgroups":
             continue
         print(name)
         fname = f"{out_dir()}{os.path.sep}passive{os.path.sep}{name}.pickle"
@@ -74,7 +78,9 @@ def run_passive(datasets, runs):
             results = {}
 
         # os.cpu_count()
-        r = Parallel(n_jobs=min(2, len(runs)))(delayed(eval_one)(results, name, dataset, run, fname) for run in runs)
+        r = Parallel(n_jobs=min(2, len(runs)))(
+            delayed(eval_one)(results, name, dataset, run, fname) for run in runs
+        )
         for run, result in r:
             results[run] = result
         with open(fname, "wb") as f:
@@ -82,13 +88,16 @@ def run_passive(datasets, runs):
         all_results[name] = results
     return all_results
 
+
 from nesi_noise import matrix
+
 
 def key(dataset):
     return dataset[1]()[0].shape[0]
 
-datasets = sorted(matrix['datasets'], key=key)
+
+datasets = sorted(matrix["datasets"], key=key)
 
 datasets = [datasets[-1]]
-                   
+
 run_passive(datasets, range(10))
