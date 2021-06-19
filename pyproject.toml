@@ -28,6 +28,7 @@ beautifulsoup4 = "^4.9.3"
 simple-slurm = "^0.1.6"
 python-dotenv = "^0.15.0"
 autorank = "^1.1.1"
+seaborn = "^0.11.1"
 
 [tool.poetry.dev-dependencies]
 pylint = "^2.6.0"
@@ -35,6 +36,7 @@ black = "^20.8b1"
 ipykernel = "^5.5.3"
 ipynb = "^0.5.1"
 ipywidgets = "^7.6.3"
+cloudpickle = "^1.6.0"
 
 [build-system]
 requires = ["poetry-core>=1.0.0"]
