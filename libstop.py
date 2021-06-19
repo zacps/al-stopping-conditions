@@ -169,7 +169,7 @@ def VM(x, uncertainty_variance, uncertainty_variance_selected, selected=True, n=
 
 def SSNCut(x, classifiers, X_unlabelled, Y_oracle, pre=None, m=.2, affinity='linear', **kwargs):
     if len(np.unique(classifiers[0].y_training)) > 2:
-        return x.iloc[-1]
+        raise InvalidAssumption('SSNCut', 'dataset was not binary')
     values = pre if pre is not None else SSNCut_values(classifiers, X_unlabelled, Y_oracle, m=.2, affinity='linear')
     
     smallest = np.infty
@@ -768,7 +768,10 @@ def eval_stopping_conditions(results_plots, classifiers, conditions=None):
     def eval_cond(name, conf, cond, j, **kwargs):
         #print(f"exec_cond Execing {name} on {conf.dataset_name}")
         if name in stop_results[conf.dataset_name] and len(stop_results[conf.dataset_name][name]) > j:
-            return stop_results[conf.dataset_name][name][j][0]
+            if isinstance(stop_results[conf.dataset_name][name][j], list) or isinstance(stop_results[conf.dataset_name][name][j], tuple):
+                return stop_results[conf.dataset_name][name][j][0]
+            else:
+                return stop_results[conf.dataset_name][name][j]
         try:
             return cond(**kwargs)
         except FailedToTerminate:
@@ -800,7 +803,7 @@ def eval_stopping_conditions(results_plots, classifiers, conditions=None):
         
         # todo: split this into chunks for memory usage reasons
         # FIXME: Parallelize
-        results = np.array(Parallel(n_jobs=1)(
+        results = np.array(Parallel(n_jobs=os.cpu_count())(
             delayed(eval_cond)(
                 name, 
                 conf, 
@@ -817,12 +820,16 @@ def eval_stopping_conditions(results_plots, classifiers, conditions=None):
         )).reshape(len(metrics), len(conditions))
         
         for i in range(len(conditions)):
-            stop_results[conf.dataset_name][list(conditions.keys())[i]] = [(
-                x if list(conditions.keys())[i] != 'SSNCut' else x+10, 
-                metrics[j]['accuracy_score'][metrics[j].x==x].iloc[0] if x is not None else None, 
-                metrics[j]['f1_score'][metrics[j].x==x].iloc[0] if x is not None else None, 
-                metrics[j]['roc_auc_score'][metrics[j].x==x].iloc[0] if x is not None else None
-            ) for j, x in enumerate(results[:,i])]
+            try:
+                stop_results[conf.dataset_name][list(conditions.keys())[i]] = [(
+                    x if list(conditions.keys())[i] != 'SSNCut' else (x+10 if x is not None else None), 
+                    metrics[j]['accuracy_score'][metrics[j].x==x].iloc[0] if x is not None else None, 
+                    metrics[j]['f1_score'][metrics[j].x==x].iloc[0] if x is not None else None, 
+                    metrics[j]['roc_auc_score'][metrics[j].x==x].iloc[0] if x is not None else None
+                ) for j, x in enumerate(results[:,i])]
+            except IndexError as e:
+                print(f"condition {list(conditions.keys())[i]} returned on dataset {conf.dataset_name}:\n{results[:,i]}")
+                raise e
         __write_stopping(conf.serialize(), stop_results[conf.dataset_name])
             
     return (conditions, stop_results)
@@ -959,3 +966,4 @@ def rank_stop_conds(stop_results, results_plots, metric, ax=None, title=None, av
     else:
         ax.figure.suptitle(title or metric.rsplit("_score")[0].replace("_", " ").title())
     return ax
+
