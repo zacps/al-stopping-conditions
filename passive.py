@@ -78,7 +78,7 @@ def run_passive(datasets, runs):
             results = {}
 
         # os.cpu_count()
-        r = Parallel(n_jobs=min(2, len(runs)))(
+        r = Parallel(n_jobs=min(os.cpu_count(), len(runs)))(
             delayed(eval_one)(results, name, dataset, run, fname) for run in runs
         )
         for run, result in r:

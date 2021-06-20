@@ -19,7 +19,7 @@ matrix = {
     # Dataset fetchers should cache if possible
     # Lambda wrapper required for function to be pickleable (sent to other threads via joblib)
     "datasets": [
-        ("newsgroups", wrap(newsgroups, None)),
+        # ("newsgroups", wrap(newsgroups, None)),
         ("rcv1", wrap(rcv1, None)),
         ("webkb", wrap(webkb, None)),
         ("spamassassin", wrap(spamassassin, None)),

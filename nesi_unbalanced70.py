@@ -137,7 +137,7 @@ matrix = {
         # ("rcv1", wrap(rcv1, None)),
         # ("webkb", wrap(webkb, None)),
         # ("spamassassin", wrap(spamassassin, None)),
-        ("avila", wrap(avila, None)),
+        # ("avila", wrap(avila, None)),
         # ("smartphone", wrap(smartphone, None)),
         ("swarm", wrap(swarm, None)),
         ("sensorless", wrap(sensorless, None)),

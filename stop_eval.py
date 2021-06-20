@@ -59,6 +59,8 @@ for plots, clfs in zip(results_plots, classifiers):
         if len(clfs_) != 100:
             raise Exception(f"{plots[0].serialize()}_{i}.zip")
 
+from libstop import *
+
 conditions = {
     "GOAL": partial(ZPS, order=2),
     "SSNCut": SSNCut,
