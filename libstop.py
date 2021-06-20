@@ -366,23 +366,39 @@ def uncertainty_convergence(
             return x.iloc[i + k]
 
     raise FailedToTerminate("performance_convergence")
-    
-    
+
+
+def overall_uncertainty(x, uncertainty_average, **kwargs):
+    """
+    Stop if the overall uncertainty on the unlabelled pool is less than a threshold.
+
+    https://www.aclweb.org/anthology/C08-1142.pdf
+    """
+    if not (uncertainty_average < 1e-2).any():
+        raise FailedToTerminate("overall_uncertainty")
+    return x.iloc[np.argmax(uncertainty_average < 1e-2)]
+
+
 def classification_change(x, classifiers, X_unlabelled, Y_oracle, pre=None, **kwargs):
     """
     Stop if the predictions on the unlabelled pool does not change between two rounds.
-    
+
     https://www.aclweb.org/anthology/C08-1142.pdf
     """
-    
-    values = pre if pre is not None else classification_change_values(classifiers, X_unlabelled, Y_oracle)
-    
-    if not any(x==1 for x in values):
-        raise FailedToTerminate('classification_change')
-    
-    print(np.argmax(values==1))
-    return x.iloc[np.argmax(values==1)]
-    
+
+    values = (
+        pre
+        if pre is not None
+        else classification_change_values(classifiers, X_unlabelled, Y_oracle)
+    )
+
+    if not any(x == 1 for x in values):
+        raise FailedToTerminate("classification_change")
+
+    print(np.argmax(values == 1))
+    return x.iloc[np.argmax(values == 1)]
+
+
 @listify
 def classification_change_values(classifiers, X_unlabelled, Y_oracle, **kwargs):
     if hasattr(classifiers[0], "X_unlabelled"):
@@ -390,16 +406,17 @@ def classification_change_values(classifiers, X_unlabelled, Y_oracle, **kwargs):
         X_unlabelleds = (clf.X_unlabelled for clf in classifiers)
     else:
         X_unlabelleds = reconstruct_unlabelled(classifiers, X_unlabelled, Y_oracle)
-        
+
     # Skip the first pool
     next(X_unlabelleds)
-        
+
     yield np.nan
-    
+
     for i, X_unlabelled in zip(range(1, len(classifiers)), X_unlabelleds):
         yield np.count_nonzero(
-            classifiers[i-1].predict(X_unlabelled)==classifiers[i].predict(X_unlabelled)
-        )/X_unlabelled.shape[0]
+            classifiers[i - 1].predict(X_unlabelled)
+            == classifiers[i].predict(X_unlabelled)
+        ) / X_unlabelled.shape[0]
 
 
 def fscore(classifiers, X_unlabelled, Y_oracle, **kwargs):

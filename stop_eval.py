@@ -59,24 +59,22 @@ for plots, clfs in zip(results_plots, classifiers):
         if len(clfs_) != 100:
             raise Exception(f"{plots[0].serialize()}_{i}.zip")
 
-params = {"kappa": {"k": 2}}
 conditions = {
-    **{
-        f"{f.__name__}": partial(f, **params.get(f.__name__, {}))
-        for f in [
-            uncertainty_min,
-            SC_entropy_mcs,
-            SC_oracle_acc_mcs,
-            SC_mes,
-            EVM,
-            # ZPS_ee_grad,
-            stabilizing_predictions,
-        ]
-    },
-    "ZPS2": partial(ZPS, order=2),
+    "GOAL": partial(ZPS, order=2),
     "SSNCut": SSNCut,
+    "SC_entropy_mcs": SC_entropy_mcs,
+    "SC_oracle_acc": SC_oracle_acc_mcs,
+    "SC_mes": SC_mes,
+    "Stabilizing Predictions": stabilizing_predictions,
+    "Performance Convergence": performance_convergence,
+    "Uncertainty Convergence": uncertainty_convergence,
+    "Max Confidence": max_confidence,
+    "EVM": EVM,
+    "VM": VM,
+    "Contradictory Information": contradictory_information,
+    "Classification Change": classification_change,
+    "Overall Uncertainty": overall_uncertainty,
 }
-
 
 stop_conditions, stop_results = libstop.eval_stopping_conditions(
     results_plots, classifiers, conditions=conditions
