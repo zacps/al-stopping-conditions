@@ -149,9 +149,7 @@ class MyActiveLearner:
         Y_test,
         query_strategy,
         config,
-        
         metrics=None,
-        
         i=None,
     ):
         self.X_labelled = X_labelled
@@ -184,7 +182,6 @@ class MyActiveLearner:
             self.ee = expected_error
         else:
             raise ValueError(f"ee must be online or offline, got {ee}")
-        
 
     def __setup_learner(self):
         if self.model == "svm-linear":
@@ -289,7 +286,6 @@ class MyActiveLearner:
             )
         else:
             raise Exception("unknown model")
-
 
     def active_learn2(self) -> Tuple[list, list]:
         """
@@ -452,7 +448,6 @@ class MyActiveLearner:
             classifiers.append(self.learner)
 
         self._checkpoint(self)
-        
 
     def _checkpoint(self, data):
         file = f"{out_dir()}/checkpoints/{self.config_str}_{self.i}.pickle"

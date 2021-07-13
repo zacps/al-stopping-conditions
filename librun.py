@@ -222,7 +222,7 @@ def run(
             # Retrieve classifiers
             for i, config in enumerate(configurations):
                 results[i] = (results[i], [__read_classifiers(config, j) for j in runs])
-                
+
     except Exception as e:
         duration = monotonic() - start
 
@@ -445,11 +445,11 @@ def __run_inner(
             runs = [fragment_run_start]
     else:
         runs = list(range(config.meta["n_runs"]))
-        
+
     # Set the number of worker threads
     if workers is None:
         workers = n_cpus()
-        
+
     # Attempt to restore a cached result
     if not force_run:
         try:
@@ -494,9 +494,7 @@ def __run_inner(
                     ),
                     method,
                     config,
-
                     metrics=metrics_measures,
-
                     i=i,
                 ).active_learn2()
             )(config.dataset(), config.method, i, random_state[idx])

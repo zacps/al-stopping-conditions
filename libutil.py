@@ -204,4 +204,3 @@ def n_cpus():
     if "sched_getaffinity" in dir(os):
         cpus = len(os.sched_getaffinity(0))
     return cpus
-    
