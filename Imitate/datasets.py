@@ -31,7 +31,7 @@ def plot_dataset_2D(data, labels):
     plt.show()
 
 
-def generateData_twoPills_2D(dataset_size, noise=0.05):
+def generateData_twoPills_2D(dataset_size, noise=0.05, random_state=2210):
     data, labels = make_classification(
         n_samples=max(10000, dataset_size),
         n_features=3,
@@ -40,7 +40,7 @@ def generateData_twoPills_2D(dataset_size, noise=0.05):
         n_classes=2,
         n_clusters_per_class=1,
         flip_y=noise,  # noise
-        random_state=2210,
+        random_state=random_state,
     )
     # the axis order changes if the noise parameter is adjusted. For the experiments on noise, we
     # set the correct order here such that the dataset always is mainly the same

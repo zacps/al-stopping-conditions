@@ -1,6 +1,6 @@
 import glob
 import os
-from libactive import CompressedStore
+from libstore import CompressedStore
 
 for name in glob.glob(f"{out_dir()}/classifiers/*"):
     if os.path.getsize(name) > 1024 ** 3:

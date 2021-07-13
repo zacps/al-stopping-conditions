@@ -33,7 +33,34 @@ import libdatasets
 from libutil import Metrics, average, n_cpus
 from libstop import first_acc, no_ahead_tvregdiff
 from libplot import align_yaxis
-from libactive import active_split, MyActiveLearner, CompressedStore
+from libactive import active_split, MyActiveLearner
+from libstore import CompressedStore
+
+
+DEFAULT_METRICS = [
+    accuracy_score,
+    f1_score,
+    roc_auc_score,
+    "time",
+    "time_total",
+    "time_ee",
+    "uncertainty_average",
+    "uncertainty_min",
+    "uncertainty_max",
+    "uncertainty_variance",
+    "uncertainty_average_selected",
+    "uncertainty_min_selected",
+    "uncertainty_max_selected",
+    "uncertainty_variance_selected",
+    "entropy_max",
+    "n_support",
+    "contradictory_information",
+    "expected_error",
+    "expected_error_min",
+    "expected_error_max",
+    "expected_error_average",
+    "expected_error_variance",
+]
 
 
 @dataclass
@@ -406,13 +433,9 @@ def __run_inner(
     fragment_run_start=None,
     fragment_run_end=None,
 ):
+    # Default metrics are deprecated
     if metrics_measures is None:
-        metrics_measures = [
-            accuracy_score,
-            f1_score,
-            roc_auc_score,
-            "time",
-        ]
+        meatrics_measures = DEFAULT_METRICS
 
     # Figure out what runs we care about
     if fragment_run_start is not None:
@@ -422,86 +445,81 @@ def __run_inner(
             runs = [fragment_run_start]
     else:
         runs = list(range(config.meta["n_runs"]))
+        
+    # Set the number of worker threads
+    if workers is None:
+        workers = n_cpus()
+        
+    # Attempt to restore a cached result
+    if not force_run:
+        try:
+            cached_config, metrics = __read_result(
+                f"{out_dir()}{os.path.sep}{config.serialize()}.csv", config, runs=runs
+            )
 
-    try:
-        cached_config, metrics = __read_result(
-            f"{out_dir()}{os.path.sep}{config.serialize()}.csv", config, runs=runs
+            return (cached_config, metrics)
+        except (FileNotFoundError, EOFError, pd.errors.EmptyDataError):
+            pass
+
+    # If we didn't find a cached result and force_cache is set raise an error
+    if force_cache:
+        raise Exception(
+            f"Cache file '{out_dir()}{os.path.sep}{config.serialize()}.csv' not found"
         )
 
-        if force_run:
-            raise FileNotFoundError()
-        return (cached_config, metrics)
+    try:
+        # Seed a random state generator. This seed is constant between methods/datasets/models so comparisons can be made with fewer runs.
+        # It is however *variant* with each run.
+        random_state = [check_random_state(i) for i in runs]
 
-    except (FileNotFoundError, EOFError, pd.errors.EmptyDataError):
-        if force_cache:
-            raise Exception(
-                f"Cache file '{out_dir()}{os.path.sep}{config.serialize()}.csv' not found"
-            )
-
-        if workers is None:
-            workers = os.cpu_count()
-            if "sched_getaffinity" in dir(os):
-                workers = len(os.sched_getaffinity(0))
-
-        try:
-            # Seed a random state generator. This seed is constant between methods/datasets/models so comparisons can be made with fewer runs.
-            # It is however *variant* with each run.
-            random_state = [check_random_state(i) for i in runs]
-
-            metrics = ProgressParallel(
-                n_jobs=min(len(runs), workers),
-                total=len(runs),
-                desc=f"Run",
-                leave=False,
-                backend=backend,
-            )(
-                delayed(
-                    lambda dataset, method, i, random_state: MyActiveLearner(
-                        # It's important that the split is re-randomised per run.
-                        *active_split(
-                            *dataset,
-                            labeled_size=config.meta.get("labelled_size", 0.1),
-                            test_size=config.meta.get("test_size", 0.5),
-                            ensure_y=config.meta.get("ensure_y", False),
-                            random_state=random_state,
-                            mutator=config.dataset_mutator,
-                            config_str=config.serialize(),
-                            i=i,
-                        ),
-                        method,
-                        metrics=metrics_measures,
-                        model=config.model_name.lower(),
-                        ret_classifiers=config.meta.get("ret_classifiers", False),
-                        stop_info=config.meta.get("stop_info", False),
-                        stop_function=config.meta.get(
-                            "stop_function", ("default", lambda learner: False)
-                        )[1],
+        metrics = ProgressParallel(
+            n_jobs=min(len(runs), workers),
+            total=len(runs),
+            desc=f"Run",
+            leave=False,
+            backend=backend,
+        )(
+            delayed(
+                lambda dataset, method, i, random_state: MyActiveLearner(
+                    # It's important that the split is re-randomised per run.
+                    *active_split(
+                        *dataset,
+                        labeled_size=config.meta.get("labelled_size", 0.1),
+                        test_size=config.meta.get("test_size", 0.5),
+                        ensure_y=config.meta.get("ensure_y", False),
+                        random_state=random_state,
+                        mutator=config.dataset_mutator,
                         config_str=config.serialize(),
                         i=i,
-                        pool_subsample=config.meta.get("pool_subsample", None),
-                        ee=config.meta.get("ee", "offline"),
-                    ).active_learn2()
-                )(config.dataset(), config.method, i, random_state[idx])
-                for idx, i in enumerate(runs)
+                    ),
+                    method,
+                    config,
+
+                    metrics=metrics_measures,
+
+                    i=i,
+                ).active_learn2()
+            )(config.dataset(), config.method, i, random_state[idx])
+            for idx, i in enumerate(runs)
+        )
+
+    except Exception as e:
+        if abort:
+            raise e
+        print("WARN: Experiment failed, continuing anyway")
+        return (config, None)
+
+    if config.meta.get("aggregate", True):
+        metrics = metrics[0].average2(metrics[1:])
+
+    __write_result(config, metrics, runs)
+    for i in runs:
+        try:
+            os.remove(
+                f"{out_dir()}{os.path.sep}runs{os.path.sep}{config.serialize()}_{i}.csv"
             )
-
-        except Exception as e:
-            if abort:
-                raise e
-            print("WARN: Experiment failed, continuing anyway")
-            return (config, None)
-
-        if config.meta.get("aggregate", True):
-            metrics = metrics[0].average2(metrics[1:])
-
-        __write_result(config, metrics, runs)
-        for i in runs:
-            try:
-                os.remove(
-                    f"{out_dir()}{os.path.sep}runs{os.path.sep}{config.serialize()}_{i}.csv"
-                )
-            except FileNotFoundError:
-                pass
+        except FileNotFoundError:
+            pass
 
     return (config, metrics)
 

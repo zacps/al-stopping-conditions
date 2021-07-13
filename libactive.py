@@ -38,6 +38,7 @@ import scipy
 
 from libplot import plot_classification, plot_poison, c_plot_poison
 from libutil import Metrics, out_dir
+from libstore import store
 
 
 def active_split(
@@ -147,20 +148,11 @@ class MyActiveLearner:
         X_test,
         Y_test,
         query_strategy,
-        stop_function=lambda learner: False,
-        ret_classifiers=False,
-        stop_info=False,
-        config_str=None,
-        i=None,
-        pool_subsample=None,
-        ee="offline",
-        model="svm-linear",
-        animate=False,
+        config,
+        
         metrics=None,
-        poison=False,
-        animation_file=None,
-        lb=None,
-        ub=None,
+        
+        i=None,
     ):
         self.X_labelled = X_labelled
         self.X_unlabelled = X_unlabelled
@@ -172,35 +164,27 @@ class MyActiveLearner:
 
         self.unique_labels = np.unique(Y_test)
 
-        self.stop_function = stop_function
-        self.ret_classifiers = ret_classifiers
-        self.stop_info = stop_info
-        self.config_str = config_str
+        self.stop_function = config.meta.get(
+            "stop_function", ("default", lambda learner: False)
+        )[1]
+        self.ret_classifiers = config.meta.get("ret_classifiers", False)
+        self.stop_info = config.meta.get("stop_info", False)
+        self.config_str = config.serialize()
         self.i = i
-        self.pool_subsample = pool_subsample
-        self.model = model
+        self.pool_subsample = config.meta.get("pool_subsample", None)
+        self.model = config.model_name.lower()
 
-        self.animate = animate
         self.metrics = Metrics(metrics=metrics)
-        self.animation_file = animation_file
-        self.poison = poison
 
-        self.lb = lb
-        self.ub = ub
-
+        # Validate expected error method
+        ee = config.meta.get("ee", "offline")
         if ee == "online":
             self.ee = expected_error_online
         elif ee == "offline":
             self.ee = expected_error
         else:
             raise ValueError(f"ee must be online or offline, got {ee}")
-
-        if self.animate:
-            if poison:
-                self.fig, self.ax = plt.subplots(1, 2, figsize=(20, 10))
-            else:
-                self.fig, self.ax = plt.subplots(1, 1, figsize=(10, 10))
-            self.cam = Camera(self.fig)
+        
 
     def __setup_learner(self):
         if self.model == "svm-linear":
@@ -502,103 +486,6 @@ class MyActiveLearner:
                 return pickle.load(f)
         except FileNotFoundError:
             return None
-
-
-@contextmanager
-def store(filename, enable, restore=False):
-    if enable:
-        inner = CompressedStore(filename, restore=restore)
-        try:
-            yield inner
-        finally:
-            inner.close()
-    else:
-        yield None
-
-
-class CompressedStore:
-    """
-    A compressed, progressively writable, object store. Writes individual objects as files in a zip archive.
-    Can be read lazily and iterated/indexed as if it were a container.
-
-    During writing use the context manager `store` to ensure all changes are reflected.
-    """
-
-    def __init__(self, filename, restore=False, read=False):
-        if read:
-            mode = "r"
-        elif restore:
-            mode = "a"
-        else:
-            mode = "w"
-        self.filename = filename
-        self.mode = mode
-        try:
-            self.zip = zipfile.ZipFile(
-                self.filename, mode, compression=zipfile.ZIP_DEFLATED
-            )
-        except Exception as e:
-            print(f"Failed to open compressed store {filename}")
-            raise e
-        self.i = len(self.zip.namelist())
-
-    def append(self, obj):
-        self.zip.writestr(str(self.i), pickle.dumps(obj))
-        assert len(self.zip.namelist()) == self.i + 1
-        # To survive unexpected interrupts (from OS, not exceptions) we need to write the zip, then re-open it in append mode.
-        # Otherwise changes will be lost because the finalizer doesn't run.
-        self.zip.close()
-        self.zip = zipfile.ZipFile(self.filename, "a", compression=zipfile.ZIP_DEFLATED)
-        self.i = len(self.zip.namelist())
-
-    def __len__(self):
-        return self.i
-
-    def __getitem__(self, i):
-        if isinstance(i, slice):
-            if i.start < 0:
-                i.start = self.i - i.start
-            if i.stop is not None and i.stop < 0:
-                i.stop = self.i - i.stop
-            try:
-                return [
-                    pickle.Unpickler(self.zip.open(str(x))).load()
-                    for x in range(i.start, i.stop or self.i, i.step or 1)
-                ]
-            except KeyError:
-                raise IndexError(f"index {i} out of range for store of length {self.i}")
-
-        if i < 0:
-            i = self.i - 1 - i
-        try:
-            return pickle.Unpickler(self.zip.open(str(i))).load()
-        except KeyError:
-            raise IndexError(f"index {i} out of range for store of length {self.i}")
-
-    # As written this is a single use iterable, create a closure here which keeps an ephemeral counter.
-    def __iter__(self):
-        i = 0
-        while i < self.i:
-            yield self[i]
-            i += 1
-
-    def close(self):
-        self.zip.close()
-
-    def __getstate__(self):
-        if hasattr(self, "zip"):
-            odict = self.__dict__.copy()
-            del odict["zip"]
-        return odict
-
-    def __setstate__(self, d):
-        self.__dict__ = d
-        self.zip = zipfile.ZipFile(
-            self.filename,
-            "r" if self.mode == "r" else "a",
-            compression=zipfile.ZIP_DEFLATED,
-        )
-        self.i = len(self.zip.namelist())
 
 
 def delete_from_csr(mat, row_indices=None, col_indices=None):
