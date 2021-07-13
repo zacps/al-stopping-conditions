@@ -2,6 +2,7 @@ import os
 
 from functools import wraps
 
+import scipy
 import pandas as pd
 import numpy as np
 from joblib import Parallel
@@ -196,3 +197,11 @@ def listify(fn=None, wrapper=list):
     if fn is None:
         return listify_return
     return listify_return(fn)
+
+
+def n_cpus():
+    cpus = os.cpu_count()
+    if "sched_getaffinity" in dir(os):
+        cpus = len(os.sched_getaffinity(0))
+    return cpus
+    

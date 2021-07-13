@@ -39,12 +39,6 @@ import scipy
 from libplot import plot_classification, plot_poison, c_plot_poison
 from libutil import Metrics, out_dir
 
-# Use GPU-based thundersvm when available
-try:
-    from thundersvm import SVC as ThunderSVC
-except Exception:
-    pass
-
 
 def active_split(
     X,
@@ -139,30 +133,6 @@ def active_split(
     assert (
         X_labelled.shape[1] == X_unlabelled.shape[1] == X_test.shape[1]
     ), "X shape inconsistent"
-
-    return X_labelled, X_unlabelled, Y_labelled, Y_oracle, X_test, Y_test
-
-
-def active_split_query_synthesis(
-    X, Y, test_size=0.5, labeled_size=0.1, shuffle=True, random_state=None
-):
-    """
-    Split data into three sets:
-    * Labeled training set (0.1)
-    * Unlabeled training set, to be queried (0.4)
-    * Labeled test (0.5)
-    """
-
-    X_train, X_test, Y_train, Y_test = train_test_split(
-        X, Y, test_size=test_size, shuffle=shuffle, random_state=random_state
-    )
-    X_labelled, X_unlabelled, Y_labelled, Y_oracle = train_test_split(
-        X_train,
-        Y_train,
-        test_size=(1 - labeled_size / test_size),
-        shuffle=shuffle,
-        random_state=random_state,
-    )
 
     return X_labelled, X_unlabelled, Y_labelled, Y_oracle, X_test, Y_test
 
@@ -336,100 +306,6 @@ class MyActiveLearner:
         else:
             raise Exception("unknown model")
 
-    def __animation_frame(
-        self,
-        learner,
-        X_unlabelled=None,
-        new=None,
-        new_labels=None,
-        start_points=None,
-        ax=None,
-    ):
-        if ax is None:
-            ax = self.ax
-        if X_unlabelled is not None:
-            ax.scatter(X_unlabelled[:, 0], X_unlabelled[:, 1], c="black", s=20)
-
-        plot_classification(
-            ax,
-            learner.estimator,
-            learner.X_training,
-            learner.y_training,
-            np.concatenate((learner.X_training, X_unlabelled), axis=0)
-            if X_unlabelled
-            else learner.X_training,
-        )
-
-        ax.text(
-            0.9,
-            0.05,
-            str(
-                learner.X_training.shape[0],
-            ),
-            transform=ax.transAxes,
-            c="white",
-        )
-        self.cam.snap()
-
-    def __animation_frame_poison(
-        self, learner, X_test, y_test, attack_points, start_points, ax=None
-    ):
-        if ax is None:
-            ax = self.ax
-        plot_poison(
-            clf=learner.estimator,
-            X_labelled=learner.X_training,
-            y_labelled=learner.y_training,
-            X_unlabelled=None,
-            y_unlabelled=None,
-            X_test=X_test,
-            y_test=y_test,
-            attack=None,
-            attack_points=attack_points,
-            start_points=start_points,
-            start_points_y=learner.estimator.predict(start_points),
-            ax=ax,
-        )
-
-        ax.text(
-            0.9,
-            0.05,
-            str(
-                learner.X_training.shape[0],
-            ),
-            transform=ax.transAxes,
-            c="white",
-        )
-
-    def __animation_frame_poison_c(
-        self, learner, attack, lb, ub, attack_points, start_points, x_seq=None, ax=None
-    ):
-        if ax is None:
-            ax = self.ax
-        c_plot_poison(
-            X_labelled=learner.X_training,
-            y_labelled=learner.y_training,
-            attack=attack,
-            lb=lb,
-            ub=ub,
-            attack_points=attack_points,
-            start_points=start_points,
-            start_points_y=learner.estimator.predict(start_points)
-            if start_points is not None
-            else None,
-            x_seq=x_seq,
-            ax=ax,
-        )
-
-        ax.text(
-            0.9,
-            0.05,
-            str(
-                learner.X_training.shape[0],
-            ),
-            transform=ax.transAxes,
-            c="white",
-        )
 
     def active_learn2(self) -> Tuple[list, list]:
         """
@@ -592,6 +468,7 @@ class MyActiveLearner:
             classifiers.append(self.learner)
 
         self._checkpoint(self)
+        
 
     def _checkpoint(self, data):
         file = f"{out_dir()}/checkpoints/{self.config_str}_{self.i}.pickle"
@@ -724,86 +601,6 @@ class CompressedStore:
         self.i = len(self.zip.namelist())
 
 
-class BeamClf:
-    def __init__(
-        self, X_labelled, y_labelled, X_unlabelled, y_unlabelled, X_test, y_test
-    ):
-        self._ = SVC(kernel="linear", probability=True)
-        self._.fit(X_labelled, y_labelled)
-        self.X = X_labelled
-        self.y = y_labelled
-        self.X_unlabelled = X_unlabelled
-        self.y_unlabelled = y_unlabelled
-        self.X_test = X_test
-        self.y_test = y_test
-        self.metrics = Metrics()
-        self.metrics.collect(len(self.X), self._, self.y_test, self.X_test)
-
-    def teach(self, idx):
-        self.X = np.concatenate((self.X, [self.X_unlabelled[idx]]), axis=0)
-        self.y = np.concatenate((self.y, [self.y_unlabelled[idx]]), axis=0)
-        self.X_unlabelled = np.delete(self.X_unlabelled, idx, axis=0)
-        self.y_unlabelled = np.delete(self.y_unlabelled, idx, axis=0)
-
-        self._.fit(self.X, self.y)
-        self.metrics.collect(len(self.X), self._, self.y_test, self.X_test)
-
-    def done(self):
-        return len(self.X_unlabelled) == 0
-
-
-def beam_search2(
-    X_labelled,
-    X_unlabelled,
-    y_labelled,
-    y_unlabelled,
-    X_test,
-    y_test,
-    workers: int = 1,
-    beam_width: int = 5,
-    metric: str = "accuracy_score",
-):
-    """
-    Perform beam-search on the split dataset.
-
-    This should generate a best-guess at the optimal active learning sequence for a dataset.
-    """
-    classifiers = [
-        BeamClf(X_labelled, y_labelled, X_unlabelled, y_unlabelled, X_test, y_test)
-    ]
-
-    while any(not clf.done() for clf in classifiers):
-        temp_clfs = []
-        for clf in classifiers:
-            temp_clfs.append([])
-            if workers == 1:
-                for idx in range(len(clf.X_unlabelled)):
-                    new = deepcopy(clf)
-                    new.teach(idx)
-                    temp_clfs[-1].append(new)
-            else:
-
-                def func(idx):
-                    new = deepcopy(clf)
-                    new.teach(idx)
-                    return new
-
-                temp_clfs[-1].extend(
-                    Parallel(n_jobs=workers)(
-                        delayed(lambda i: func(i))(idx)
-                        for idx in range(len(clf.X_unlabelled))
-                    )
-                )
-
-        for l in temp_clfs:
-            l.sort(key=lambda clf: clf.metrics.frame[metric].iloc[-1], reverse=True)
-
-        classifiers = [clf for clf in l for l in temp_clfs][:beam_width]
-        temp_clfs = []
-
-    return classifiers[0]
-
-
 def delete_from_csr(mat, row_indices=None, col_indices=None):
     """
     Remove the rows (denoted by ``row_indices``) and columns (denoted by ``col_indices``) from the CSR sparse matrix ``mat``.
@@ -835,23 +632,6 @@ def delete_from_csr(mat, row_indices=None, col_indices=None):
         return mat[:, mask]
     else:
         return mat
-
-
-def interactive_img_oracle(images):
-    fig, axes = plt.subplots(len(images))
-    for i, (ax, image) in enumerate(zip(np.array(axes).flatten(), images)):
-        ax.imshow(image.reshape(8, 8), cmap="gray", interpolation="none")
-        ax.set_xticks(())
-        ax.set_yticks(())
-        ax.set_title(str(i))
-    display(fig)
-    classes = []
-    for i in range(len(images)):
-        klass = input(f"Image {i} class?")
-        if klass == "?":
-            klass = 11
-        classes.append(int(klass))
-    return np.array(classes)
 
 
 def expected_error(learner, X, predict_proba=None, p_subsample=1.0, unique_labels=None):
@@ -901,62 +681,6 @@ def expected_error(learner, X, predict_proba=None, p_subsample=1.0, unique_label
         else:
             expected_error[x_idx] = np.inf
 
-    return expected_error
-
-
-def expected_error_online(
-    learner, X, predict_proba=None, p_subsample=1.0, unique_labels=None
-):
-    loss = "binary"
-
-    expected_error = np.zeros(shape=(X.shape[0],))
-    possible_labels = (
-        unique_labels if unique_labels is not None else np.unique(learner.y_training)
-    )
-
-    X_proba = predict_proba or learner.predict_proba(X)
-
-    base_estimator = sklearn.linear_model.SGDClassifier(
-        loss="hinge", penalty="l2", eta0=0.1, learning_rate="constant"
-    )
-    # TODO: Multiple epochs?
-    base_estimator.partial_fit(
-        learner.X_training, learner.y_training, classes=possible_labels
-    )
-
-    for x_idx in range(X.shape[0]):
-        # subsample the data if needed
-        if np.random.rand() <= p_subsample:
-            if isinstance(X, csr_matrix):
-                X_reduced = delete_from_csr(X, [x_idx])
-            else:
-                X_reduced = np.delete(X, x_idx, axis=0)
-            # estimate the expected error
-            for y_idx, y in enumerate(possible_labels):
-                # raise Exception(y)
-                cloned_estimator = deepcopy(base_estimator)
-                cloned_estimator.partial_fit(X[[x_idx]], [y])
-
-                # calibrated_estimator = calibration.CalibratedClassifierCV(
-                #    # is eta=0.1 right?
-                #    # https://stackoverflow.com/questions/23056460/does-the-svm-in-sklearn-support-incremental-online-learning
-                #    base_estimator=cloned_estimator,
-                #    ensemble=False,
-                #    cv='prefit'
-                # )
-
-                refitted_proba = cloned_estimator.decision_function(X_reduced)
-
-                nloss = refitted_proba  # _proba_uncertainty(refitted_proba)
-
-                # assert (nloss>=0).all() and (nloss<=1).all()
-
-                expected_error[x_idx] += np.sum(np.abs(nloss)) * X_proba[x_idx, y_idx]
-
-        else:
-            expected_error[x_idx] = np.inf
-
-    assert (expected_error < 10000).all() and (expected_error >= 0).all()
     return expected_error
 
 

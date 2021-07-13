@@ -30,7 +30,7 @@ from sklearn.svm import SVC
 from tabulate import tabulate
 
 import libdatasets
-from libutil import Metrics, average
+from libutil import Metrics, average, n_cpus
 from libstop import first_acc, no_ahead_tvregdiff
 from libplot import align_yaxis
 from libactive import active_split, MyActiveLearner, CompressedStore
@@ -55,15 +55,6 @@ class Config:
             ]
         )
         return f"{self.dataset_name}__{self.dataset_mutator_name}__{self.method_name}__{self.model_name}__{meta_str}"
-
-    def serialize_no_model(self):
-        meta_str = "__".join(
-            [
-                f"{k}={v}" if k != "stop_function" else f"{k}={v[0]}"
-                for k, v in self.meta.items()
-            ]
-        )
-        return f"{self.dataset_name}__{self.dataset_mutator_name}__{self.method_name}__{meta_str}"
 
     def json(self):
         return {
@@ -120,7 +111,6 @@ class Configurations:
         return len(self.configurations)
 
 
-# TODO: Add profiling support?
 def run(
     matrix,
     force_cache=False,
@@ -136,8 +126,7 @@ def run(
     dry_run=False,
 ):
     print(sys.argv)
-    if fragment_id is None:
-        __progress_hack()
+
     configurations = Configurations(matrix)
     start = monotonic()
 
@@ -162,10 +151,9 @@ def run(
 
     # Detect number of available CPUs
     if workers is None:
-        workers = os.cpu_count()
-        if "sched_getaffinity" in dir(os):
-            workers = len(os.sched_getaffinity(0))
+        workers = n_cpus()
 
+    # Calculate the number of repeated runs that were asked for
     if fragment_run_start is not None:
         n_runs = (
             (fragment_run_end - fragment_run_start + 1)
@@ -207,6 +195,7 @@ def run(
             # Retrieve classifiers
             for i, config in enumerate(configurations):
                 results[i] = (results[i], [__read_classifiers(config, j) for j in runs])
+                
     except Exception as e:
         duration = monotonic() - start
 
@@ -422,7 +411,6 @@ def __run_inner(
             accuracy_score,
             f1_score,
             roc_auc_score,
-            # empirical_robustness,
             "time",
         ]
 
@@ -436,20 +424,10 @@ def __run_inner(
         runs = list(range(config.meta["n_runs"]))
 
     try:
-        try:
-            cached_config, metrics = __read_result(
-                f"{out_dir()}{os.path.sep}{config.serialize()}.csv", config, runs=runs
-            )
-        except FileNotFoundError as e:
-            if config.model_name == None or config.model_name == "svm-linear":
-                cached_config, metrics = __read_result(
-                    f"{out_dir()}{os.path.sep}{config.serialize_no_model()}.csv",
-                    config,
-                    runs=runs,
-                )
-                cached_config.model_name = "svm-linear"
-            else:
-                raise e
+        cached_config, metrics = __read_result(
+            f"{out_dir()}{os.path.sep}{config.serialize()}.csv", config, runs=runs
+        )
+
         if force_run:
             raise FileNotFoundError()
         return (cached_config, metrics)
