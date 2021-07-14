@@ -1,4 +1,6 @@
 import os
+import socket
+import requests
 
 from functools import wraps
 
@@ -204,3 +206,29 @@ def n_cpus():
     if "sched_getaffinity" in dir(os):
         cpus = len(os.sched_getaffinity(0))
     return cpus
+
+
+class Notifier:
+    def __init__(self, webhook):
+        self.webhook = webhook
+
+    def notify(self, data):
+        for _i in range(3):
+            try:
+                requests.post(
+                    self.webhook,
+                    data={"content": data},
+                )
+                break
+            except ConnectionError as con_err:
+                print(f"Couldn't send failed notification because: {con_err}")
+
+    def completion(self, configurations, duration):
+        return self.notify(
+            f"Run with {len(configurations)} experiments on {socket.gethostname()} completed after {duration/60/60:.1f}h"
+        )
+
+    def error(self, configurations, duration, e):
+        return self.notify(
+            f"Run with {len(configurations)} experiments on {socket.gethostname()} **FAILED** after {duration/60/60:.1f}h\n```{e}```"
+        )

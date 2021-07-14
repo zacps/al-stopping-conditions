@@ -29,8 +29,7 @@ matrix = {
     ],
     "models": [
         "svm-linear",
-        "decision-tree",
-        "random-forest",
+        # "random-forest",
     ],
     "meta": {
         "dataset_size": 1000,
@@ -49,15 +48,20 @@ matrix = {
     },
 }
 
-results = librun.run(matrix, force_cache=True, fragment_run_start=0, fragment_run_end=9)
+results = librun.run(matrix, force_cache=True, fragment_run_start=0, fragment_run_end=2)
 results_plots = [result[0] for result in results]
 classifiers = [result[1] for result in results]
 classifiers = [clf for clf in classifiers]
 
+broken = []
 for plots, clfs in zip(results_plots, classifiers):
     for i, clfs_ in enumerate(clfs):
         if len(clfs_) != 100:
-            raise Exception(f"{plots[0].serialize()}_{i}.zip")
+            broken.append(f"{plots[0].serialize()}_{i}.zip")
+if len(broken) != 0:
+    print(
+        "WARN, some datasets had the wrong number of classifiers:\n" + "\n".join(broken)
+    )
 
 from libstop import *
 

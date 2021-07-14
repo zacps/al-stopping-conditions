@@ -41,17 +41,19 @@ Which take a threshold and a number of iterations for which the value should be 
 import time
 import itertools
 import os
-import dill
+import logging
 from functools import partial
 import operator
 
-from joblib import Parallel, delayed
+import dill
 import numpy as np
 import pandas as pd
 import scipy
+from joblib import Parallel, delayed
 from sklearn.cluster import SpectralClustering
 from sklearn import metrics
 from sklearn.utils import check_random_state
+from sklearn.metrics.pairwise import euclidean_distances
 from sklearn.metrics import roc_auc_score, f1_score, cohen_kappa_score
 from sklearn.preprocessing import LabelEncoder
 from libactive import active_split, delete_from_csr
@@ -63,6 +65,9 @@ from modAL.uncertainty import classifier_entropy
 
 import libdatasets
 from libutil import out_dir, listify
+
+
+logger = logging.getLogger(__name__)
 
 
 class FailedToTerminate(Exception):
@@ -218,7 +223,13 @@ def SSNCut(
 
 
 def SSNCut_values(
-    classifiers, X_unlabelled, Y_oracle, m=0.2, affinity="linear", **kwargs
+    classifiers,
+    X_unlabelled,
+    Y_oracle,
+    m=0.2,
+    affinity="linear",
+    dense_atol=1e-6,
+    **kwargs,
 ):
     """
     NOTES:
@@ -243,7 +254,9 @@ def SSNCut_values(
         # Don't store all pools in memory, generator expression
         X_unlabelleds = (clf.X_unlabelled for clf in classifiers)
     else:
-        X_unlabelleds = reconstruct_unlabelled(classifiers, X_unlabelled, Y_oracle)
+        X_unlabelleds = reconstruct_unlabelled(
+            classifiers, X_unlabelled, Y_oracle, dense_atol=dense_atol
+        )
 
     for i, (clf, X_unlabelled) in enumerate(zip(classifiers, X_unlabelleds)):
         # print(f"{i}/{len(classifiers)}")
@@ -304,6 +317,7 @@ def performance_convergence(
     threshold=5e-5,
     k=10,
     average=np.mean,
+    dense_atol=1e-6,
     **kwargs,
 ):
     """
@@ -313,7 +327,11 @@ def performance_convergence(
     https://www.aclweb.org/anthology/C08-1059.pdf
     """
 
-    perf = pre if pre is not None else list(fscore(classifiers, X_unlabelled, Y_oracle))
+    perf = (
+        pre
+        if pre is not None
+        else list(fscore(classifiers, X_unlabelled, Y_oracle, dense_atol=dense_atol))
+    )
     windows = np.lib.stride_tricks.sliding_window_view(perf, k)
     for i in range(1, len(windows)):
         w2 = average(windows[i])
@@ -379,7 +397,9 @@ def overall_uncertainty(x, uncertainty_average, **kwargs):
     return x.iloc[np.argmax(uncertainty_average < 1e-2)]
 
 
-def classification_change(x, classifiers, X_unlabelled, Y_oracle, pre=None, **kwargs):
+def classification_change(
+    x, classifiers, X_unlabelled, Y_oracle, pre=None, dense_atol=1e-6, **kwargs
+):
     """
     Stop if the predictions on the unlabelled pool does not change between two rounds.
 
@@ -389,7 +409,9 @@ def classification_change(x, classifiers, X_unlabelled, Y_oracle, pre=None, **kw
     values = (
         pre
         if pre is not None
-        else classification_change_values(classifiers, X_unlabelled, Y_oracle)
+        else classification_change_values(
+            classifiers, X_unlabelled, Y_oracle, dense_atol=dense_atol
+        )
     )
 
     if not any(x == 1 for x in values):
@@ -400,12 +422,12 @@ def classification_change(x, classifiers, X_unlabelled, Y_oracle, pre=None, **kw
 
 
 @listify
-def classification_change_values(classifiers, X_unlabelled, Y_oracle, **kwargs):
-    if hasattr(classifiers[0], "X_unlabelled"):
-        # Don't store all pools in memory, use a generator expression
-        X_unlabelleds = (clf.X_unlabelled for clf in classifiers)
-    else:
-        X_unlabelleds = reconstruct_unlabelled(classifiers, X_unlabelled, Y_oracle)
+def classification_change_values(
+    classifiers, X_unlabelled, Y_oracle, dense_atol=1e-6, **kwargs
+):
+    X_unlabelleds = reconstruct_unlabelled(
+        classifiers, X_unlabelled, Y_oracle, dense_atol=dense_atol
+    )
 
     # Skip the first pool
     next(X_unlabelleds)
@@ -413,21 +435,20 @@ def classification_change_values(classifiers, X_unlabelled, Y_oracle, **kwargs):
     yield np.nan
 
     for i, X_unlabelled in zip(range(1, len(classifiers)), X_unlabelleds):
+        # print(f"At iteration {i} unlabelled pool has shape {X_unlabelled.shape if X_unlabelled is not None else 'None'}")
         yield np.count_nonzero(
             classifiers[i - 1].predict(X_unlabelled)
             == classifiers[i].predict(X_unlabelled)
         ) / X_unlabelled.shape[0]
 
 
-def fscore(classifiers, X_unlabelled, Y_oracle, **kwargs):
+def fscore(classifiers, X_unlabelled, Y_oracle, dense_atol=1e-6, **kwargs):
     """
     https://www.aclweb.org/anthology/C08-1059
     """
-    if hasattr(classifiers[0], "X_unlabelled"):
-        # Don't store all pools in memory, use a generator expression
-        X_unlabelleds = (clf.X_unlabelled for clf in classifiers)
-    else:
-        X_unlabelleds = reconstruct_unlabelled(classifiers, X_unlabelled, Y_oracle)
+    X_unlabelleds = reconstruct_unlabelled(
+        classifiers, X_unlabelled, Y_oracle, dense_atol=dense_atol
+    )
 
     for clf, X_unlabelled in zip(classifiers, X_unlabelleds):
 
@@ -455,64 +476,104 @@ def fscore(classifiers, X_unlabelled, Y_oracle, **kwargs):
         yield 2 * tp(p, d) / (2 * tp(p, d) + fp(p, d) + fn(p, d))
 
 
-def reconstruct_unlabelled(clfs, X_unlabelled, Y_oracle):
+def reconstruct_unlabelled(clfs, X_unlabelled, Y_oracle, dense_atol=1e-6):
     """
     Reconstruct the unlabelled pool from stored information. We do not directly store the unlabelled pool,
     but we store enough information to reproduce it. This was used to compute stopping conditions implemented
     after some experiments had been started.
     """
+    # Defensive asserts
+    assert clfs is not None, "Classifiers must be non-none"
+    assert X_unlabelled is not None, "X_unlabelled must be non-none"
+    assert Y_oracle is not None, "Y_oracle must be non-none"
     assert (
         X_unlabelled.shape[0] == Y_oracle.shape[0]
     ), "unlabelled and oracle pools have a different shape"
 
-    if not isinstance(X_unlabelled, scipy.sparse.csr_matrix):
-        for clf in clfs:
-            yield X_unlabelled[
-                (X_unlabelled[:, np.newaxis] != clf.X_training).all(-1).any(-1)
-            ]
-
     # Fast row-wise compare function
-    def compare(A, B):
+    def compare(A, B, sparse):
         "https://stackoverflow.com/questions/23124403/how-to-compare-2-sparse-matrix-stored-using-scikit-learn-library-load-svmlight-f"
-        return np.where(
-            np.isclose(
-                (np.array(A.multiply(A).sum(1)) + np.array(B.multiply(B).sum(1)).T)
-                - 2 * A.dot(B.T).toarray(),
-                0,
+        if sparse:
+            pairs = np.where(
+                np.isclose(
+                    (np.array(A.multiply(A).sum(1)) + np.array(B.multiply(B).sum(1)).T)
+                    - 2 * A.dot(B.T).toarray(),
+                    0,
+                )
             )
-        )
+            # TODO: Assert A[A_idx] == B[B_idx] for all pairs? Harder with sparse matrices.
+        else:
+            dists = euclidean_distances(A, B, squared=True)
+            pairs = np.where(np.isclose(dists, 0, atol=dense_atol))
+            for A_idx, B_idx in zip(*pairs):
+                try:
+                    assert (A[A_idx] == B[B_idx]).all()
+                except AssertionError as e:
+                    print(A[A_idx])
+                    print(B[A_idx])
+                    raise e
+        return pairs
 
+    # Yield the initial unlabelled pool
     yield X_unlabelled.copy()
+
     for clf in clfs[1:]:
         assert X_unlabelled.shape[0] == Y_oracle.shape[0]
-        t0 = time.monotonic()
+
         # make sure we're only checking for values from the 10 most recently added points
         # otherwise we might think a duplicate is a new point and try to add it, making the
         # count wrong!
-        equal_rows = list(compare(X_unlabelled, clf.X_training[-10:]))
+        equal_rows = list(
+            compare(
+                X_unlabelled,
+                clf.X_training[-10:],
+                sparse=isinstance(X_unlabelled, scipy.sparse.csr_matrix),
+            )
+        )
+        # Index fixing?
         equal_rows[1] = equal_rows[1] + (clf.X_training.shape[0] - 10)
-        # Some datasets (rcv1) contain duplicates. These were only queried once, so we make sure we only remove a single
-        # copy from the unlabelled pool.
+
+        # Some datasets (rcv1) contain duplicates. These were only queried once, so we
+        # make sure we only remove a single copy from the unlabelled pool.
         if len(equal_rows[0]) > 10:
+            logger.debug(f"Found {len(equal_rows[0])} equal rows")
             really_equal_rows = []
             for clf_idx in np.unique(equal_rows[1]):
                 dupes = equal_rows[0][equal_rows[1] == clf_idx]
                 # some datasets have duplicates with differing labels (rcv1)
-                dupes_correct_label = dupes[Y_oracle[dupes] == clf.y_training[clf_idx]][
-                    0
-                ]
+                dupes_correct_label = dupes[
+                    (Y_oracle[dupes] == clf.y_training[clf_idx])
+                    &
+                    # this check is necessary so we don't mark an instance for removal twice
+                    # when we want to mark another duplicate
+                    np.logical_not(np.isin(dupes, really_equal_rows))
+                ][0]
                 really_equal_rows.append(dupes_correct_label)
+            logger.debug(f"Found {len(really_equal_rows)} really equal rows")
 
-        else:
+        elif len(equal_rows[0]) == 10:
             # Fast path with no duplicates
             assert (Y_oracle[equal_rows[0]] == clf.y_training[equal_rows[1]]).all()
             really_equal_rows = equal_rows[0]
+        else:
+            raise Exception(
+                f"Less than 10 ({len(equal_rows[0])}) equal rows were found."
+                + " This could indicate an issue with the row-wise compare"
+                + " function."
+            )
 
-        assert len(really_equal_rows) == 10, f"{len(really_equal_rows)}=={last_n}"
-        X_unlabelled = delete_from_csr(X_unlabelled, really_equal_rows)
+        assert len(really_equal_rows) == 10, f"{len(really_equal_rows)}==10"
+
+        n_before = X_unlabelled.shape[0]
+        if isinstance(X_unlabelled, scipy.sparse.csr_matrix):
+            X_unlabelled = delete_from_csr(X_unlabelled, really_equal_rows)
+        else:
+            X_unlabelled = np.delete(X_unlabelled, really_equal_rows, axis=0)
         Y_oracle = np.delete(Y_oracle, really_equal_rows, axis=0)
-        # print(f"reconstruct took {time.monotonic()-t0}")
-        # TODO: Check if copy is necessary
+        assert (
+            X_unlabelled.shape[0] == n_before - 10
+        ), f"We found 10 equal rows but {n_before-X_unlabelled.shape[0]} were removed"
+
         yield X_unlabelled.copy()
 
 
@@ -589,8 +650,8 @@ def max_confidence(x, classifiers, pre=None, threshold=0.001, **kwargs):
     https://www.aclweb.org/anthology/D07-1082.pdf
     """
 
-    metric = (
-        pre if pre is not None else metric_selected(classifier_entropy, classifiers)
+    metric = np.array(
+        pre if pre is not None else metric_selected(classifiers, classifier_entropy)
     )
     if not (metric < threshold).any():
         raise FailedToTerminate("max_confidence")
@@ -951,7 +1012,6 @@ def eval_stopping_conditions(results_plots, classifiers, conditions=None):
     stop_results = {}
 
     def eval_cond(name, conf, cond, j, **kwargs):
-        # print(f"exec_cond Execing {name} on {conf.dataset_name}")
         if (
             name in stop_results[conf.dataset_name]
             and len(stop_results[conf.dataset_name][name]) > j
@@ -963,49 +1023,51 @@ def eval_stopping_conditions(results_plots, classifiers, conditions=None):
             else:
                 return stop_results[conf.dataset_name][name][j]
         try:
+            # Hack: Swarm needs a more relaxed tolerance for reconstruct_unlabelled
+            if conf.dataset_name == "swarm":
+                kwargs["dense_atol"] = 1e-1
+            else:
+                kwargs["dense_atol"] = 1e-6
             return cond(**kwargs)
         except FailedToTerminate:
             print(f"{name} failed to terminate on {conf.dataset_name} run {j}")
+            return None
+        except InvalidAssumption:
             return None
         except Exception as e:
             print(
                 f"WARNING {name} failed on {conf.dataset_name} run {j} with exception: {e}"
             )
-            return None
+            raise e
 
     for (clfs, (conf, metrics)) in zip(classifiers, results_plots):
         stop_results[conf.dataset_name] = __read_stopping(conf.serialize())
 
-        if (
-            "stabilizing_predictions" in conditions.keys()
-            or "SSNCut" in conditions.keys()
-        ):
-            X, y = getattr(libdatasets, conf.dataset_name)(None)
+        X, y = getattr(libdatasets, conf.dataset_name)(None)
 
-            def pools(X, y, conf, runs):
-                for i in runs:
-                    _, X_unlabelled, _, y_oracle, _, _ = active_split(
-                        X,
-                        y,
-                        labeled_size=conf.meta["labelled_size"],
-                        test_size=conf.meta["test_size"],
-                        random_state=check_random_state(i),
-                        ensure_y=conf.meta["ensure_y"],
-                    )
-                    yield (X_unlabelled, y_oracle)
+        def pools(X, y, conf, runs):
+            for i in runs:
+                _, X_unlabelled, _, y_oracle, _, _ = active_split(
+                    X,
+                    y,
+                    labeled_size=conf.meta["labelled_size"],
+                    test_size=conf.meta["test_size"],
+                    random_state=check_random_state(i),
+                    ensure_y=conf.meta["ensure_y"],
+                )
+                assert X_unlabelled.shape[0] > 0, "Unlabelled pool cannot have length 0"
+                assert (
+                    y_oracle.shape[0] > 0
+                ), "Unlabelled pool labels cannot have length 0"
+                yield (X_unlabelled, y_oracle)
 
-            it1, it2 = itertools.tee(pools(X, y, conf, conf.runs))
-            unlabelled_pools = map(operator.itemgetter(0), it1)
-            y_oracles = map(operator.itemgetter(1), it2)
-
-        else:
-            unlabelled_pools = [None] * len(clfs)
-            y_oracles = [None] * len(clfs)
+        it1, it2 = itertools.tee(pools(X, y, conf, conf.runs))
+        unlabelled_pools = map(operator.itemgetter(0), it1)
+        y_oracles = map(operator.itemgetter(1), it2)
 
         # todo: split this into chunks for memory usage reasons
-        # FIXME: Parallelize
         results = np.array(
-            Parallel(n_jobs=os.cpu_count())(
+            Parallel(n_jobs=min(os.cpu_count(), len(metrics) * len(conditions)))(
                 delayed(eval_cond)(
                     name,
                     conf,

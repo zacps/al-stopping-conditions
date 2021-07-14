@@ -451,8 +451,14 @@ class MyActiveLearner:
 
     def _checkpoint(self, data):
         file = f"{out_dir()}/checkpoints/{self.config_str}_{self.i}.pickle"
-        with open(file, "wb") as f:
-            dill.dump(data, f)
+        for _i in range(3):
+            try:
+                with open(file, "wb") as f:
+                    dill.dump(data, f)
+                break
+            except Exception:
+                print(f"Failed attempt {i+1} of 3 to write to checkpoint {file}")
+                pass
 
     def _restore_checkpoint(self):
         file = f"{out_dir()}/checkpoints/{self.config_str}_{self.i}.pickle"
@@ -461,6 +467,8 @@ class MyActiveLearner:
                 return dill.load(f)
         except FileNotFoundError:
             return None
+        except EOFError as e:
+            raise Exception(f"Failed to load checkpoint {file}") from e
 
     def _cleanup_checkpoint(self):
         file = f"{out_dir()}/checkpoints/{self.config_str}_{self.i}.pickle"

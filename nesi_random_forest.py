@@ -87,6 +87,7 @@ def main():
     parser.add_argument("fragment_run")
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--nobackup", action="store_true")
+    parser.add_argument("--force-run", action="store_true")
 
     args = parser.parse_args()
 
@@ -109,6 +110,7 @@ def main():
         fragment_run_start=start,
         fragment_run_end=end,
         dry_run=args.dry_run,
+        force_run=args.force_run,
     )
 
 

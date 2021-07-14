@@ -10,7 +10,7 @@ import argparse
 from dotenv import load_dotenv
 
 # Neural networks are big, so get written to the nobackup storage
-os.environ["OUT_DIR"] = "/home/zpul156/out_nobackup"
+# os.environ["OUT_DIR"] = "/home/zpul156/out_nobackup"
 
 from sklearn.metrics import accuracy_score, f1_score, roc_auc_score
 

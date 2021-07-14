@@ -1,20 +1,22 @@
+import time
+
 from libactive import active_split
 from sklearn.svm import SVC
+from sklearn.ensemble import RandomForestClassifier
+from sklearn.neural_network import MLPClassifier
 import numpy as np
 import pickle
 from sklearn.metrics import accuracy_score, roc_auc_score, f1_score
 from sklearn.utils import check_random_state
 from joblib import Parallel, delayed
 import scipy
-from libutil import out_dir
+from libutil import out_dir, Notifier
 import os
 import libdatasets
 from dotenv import load_dotenv
 
-load_dotenv()
 
-
-def eval_one(results, name, dataset, run, fname):
+def eval_one(results, name, dataset, run, fname, model):
     print(f"  {run}")
     if run in results.keys():
         return (run, results[run])
@@ -35,7 +37,14 @@ def eval_one(results, name, dataset, run, fname):
         X = np.concatenate((X_labelled, X_unlabelled))
     y = np.concatenate((y_labelled, y_oracle))
 
-    clf = SVC(probability=True, kernel="linear")
+    if model == "svm-linear":
+        clf = SVC(probability=True, kernel="linear")
+    elif model == "random-forest":
+        clf = RandomForestClassifier()
+    elif model == "neural-network":
+        clf = MLPClassifier()
+    else:
+        raise Exception("Invalid model")
     clf.fit(X, y)
     predicted = clf.predict(X_test)
     predict_proba = clf.predict_proba(X_test)
@@ -60,13 +69,13 @@ def eval_one(results, name, dataset, run, fname):
     return (run, result)
 
 
-def run_passive(datasets, runs):
+def run_passive(datasets, runs, model):
     all_results = {}
     for name, dataset in datasets:
         if name == "newsgroups":
             continue
         print(name)
-        fname = f"{out_dir()}{os.path.sep}passive{os.path.sep}{name}.pickle"
+        fname = f"{out_dir()}{os.path.sep}passive{os.path.sep}{name}_{model}.pickle"
         try:
             with open(fname, "rb") as f:
                 results = pickle.load(f)
@@ -79,7 +88,7 @@ def run_passive(datasets, runs):
 
         # os.cpu_count()
         r = Parallel(n_jobs=min(os.cpu_count(), len(runs)))(
-            delayed(eval_one)(results, name, dataset, run, fname) for run in runs
+            delayed(eval_one)(results, name, dataset, run, fname, model) for run in runs
         )
         for run, result in r:
             results[run] = result
@@ -96,8 +105,21 @@ def key(dataset):
     return dataset[1]()[0].shape[0]
 
 
-datasets = sorted(matrix["datasets"], key=key)
+if __name__ == "__main__":
+    load_dotenv()
 
-datasets = [datasets[-1]]
+    datasets = sorted(matrix["datasets"], key=key)
 
-run_passive(datasets, range(10))
+    notifier = Notifier(
+        "https://discord.com/api/webhooks/809248326485934080/aIHL726wKxk42YpDI_GtjsqfAWuFplO3QrXoza1r55XRT9-Ao9Rt8sBtexZ-WXSPCtsv"
+    )
+
+    try:
+        t_0 = time.monotonic()
+        run_passive(datasets, range(10), "neural-network")
+        notifier.notify(
+            f"Passive classifier run with {len(datasets)} datasets and 10 runs completed in {(time.monotonic()-t_0)/60:.0f}m"
+        )
+    except Exception as e:
+        notifier.error(datasets, time.monotonic() - t_0, e)
+        raise e

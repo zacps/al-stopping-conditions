@@ -30,7 +30,7 @@ from sklearn.svm import SVC
 from tabulate import tabulate
 
 import libdatasets
-from libutil import Metrics, average, n_cpus
+from libutil import Metrics, average, Notifier, n_cpus
 from libstop import first_acc, no_ahead_tvregdiff
 from libplot import align_yaxis
 from libactive import active_split, MyActiveLearner
@@ -173,7 +173,14 @@ def run(
     if dry_run:
         print("Exiting due to dry run:")
         pprint(configurations)
-        print(f"Runs: {fragment_run_start}-{fragment_run_end}")
+
+        if fragment_run_end is not None:
+            runs = list(range(fragment_run_start, fragment_run_end + 1))
+        else:
+            runs = [fragment_run_start]
+
+        print(f"Runs: {runs}")
+
         return
 
     # Detect number of available CPUs
@@ -189,6 +196,10 @@ def run(
         )
     else:
         n_runs = configurations.meta["n_runs"]
+
+    notifier = Notifier(
+        "https://discord.com/api/webhooks/809248326485934080/aIHL726wKxk42YpDI_GtjsqfAWuFplO3QrXoza1r55XRT9-Ao9Rt8sBtexZ-WXSPCtsv"
+    )
 
     try:
         results = ProgressParallel(
@@ -226,29 +237,13 @@ def run(
     except Exception as e:
         duration = monotonic() - start
 
-        try:
-            requests.post(
-                "https://discord.com/api/webhooks/809248326485934080/aIHL726wKxk42YpDI_GtjsqfAWuFplO3QrXoza1r55XRT9-Ao9Rt8sBtexZ-WXSPCtsv",
-                data={
-                    "content": f"Run with {len(configurations)} experiments on {socket.gethostname()} **FAILED** after {duration/60/60:.1f}h\n```{e}```"
-                },
-            )
-        except ConnectionError as con_err:
-            print(f"Couldn't send failed notification because: {con_err}")
+        notifier.error(configurations, duration, e)
         raise e
 
     duration = monotonic() - start
 
     if duration > 10 * 60 or fragment_id is not None:
-        try:
-            requests.post(
-                "https://discord.com/api/webhooks/809248326485934080/aIHL726wKxk42YpDI_GtjsqfAWuFplO3QrXoza1r55XRT9-Ao9Rt8sBtexZ-WXSPCtsv",
-                data={
-                    "content": f"Run with {len(configurations)} experiments on {socket.gethostname()} completed after {duration/60/60:.1f}h"
-                },
-            )
-        except ConnectionError as con_err:
-            print(f"Couldn't send failed notification because: {con_err}")
+        notifier.completion(configurations, duration)
 
     return results
 
@@ -609,7 +604,7 @@ def __get_passive_scores(conf, runs):
     Get the performance scores that would be obtained by a passive classifier trained on all the
     perfect data.
     """
-    fname = f"{out_dir()}{os.path.sep}passive{os.path.sep}{conf.serialize()}.csv"
+    fname = f"{out_dir()}{os.path.sep}passive{os.path.sep}{conf.dataset_name}_{conf.model_name}.csv"
     try:
         with open(fname, "rb") as f:
             results = pickle.load(f)

@@ -267,8 +267,29 @@ def _get_frontier(res):
 def plot_paraeto_hull(results):
     datasets = list(results.keys())
     criteria = list(results[datasets[0]].keys())
-    katmap = sns.color_palette("gist_ncar", 7)
-    markers = ["s", "v", "^", "*", "D", "P", "o"]
+    katmap = sns.color_palette("gist_ncar", 18)
+    markers = [
+        "s",
+        "v",
+        "^",
+        "*",
+        "D",
+        "P",
+        "o",
+        "<",
+        ">",
+        "x",
+        "s",
+        "v",
+        "^",
+        "*",
+        "D",
+        "P",
+        "o",
+        "<",
+        ">",
+        "x",
+    ]
 
     fig, ax = plt.subplots(3, 3, figsize=(15, 15))
     for ds in range(len(datasets)):
@@ -296,7 +317,7 @@ def plot_paraeto_hull(results):
             points = res_name_f[sc_name == i]
             points = points[~np.isnan(points).any(axis=1)]
 
-            if len(points) > 0:
+            if len(points) >= 3:
                 if (
                     len(np.unique(points[:, 0])) > 1
                     and len(np.unique(points[:, 1])) > 1
