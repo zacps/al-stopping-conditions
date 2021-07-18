@@ -47,17 +47,9 @@ SCAFFOLD = {
     },
 }
 
-BASE = {
-    **SCAFFOLD
-}
+BASE = {**SCAFFOLD}
 
-LABELLED100 = {
-    **SCAFFOLD,
-    "meta": {
-        **SCAFFOLD["meta"],
-        "labelled_size": 100
-    }
-}
+LABELLED100 = {**SCAFFOLD, "meta": {**SCAFFOLD["meta"], "labelled_size": 100}}
 
 
 RANDOM_FOREST = {

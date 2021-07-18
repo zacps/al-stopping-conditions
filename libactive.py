@@ -1,15 +1,18 @@
-from typing import Tuple, Callable
 import time
-from copy import deepcopy
 import pickle
 import os
+import json
 import zipfile
+import logging
+from copy import deepcopy
+from typing import Tuple, Callable
 from contextlib import contextmanager
 
 import sklearn
 import dill
 import matplotlib.pyplot as plt
 import numpy as np
+import pandas as pd
 from celluloid import Camera
 
 try:
@@ -32,13 +35,18 @@ from sklearn.neural_network import MLPClassifier
 from sklearn.base import clone
 from sklearn import calibration
 from sklearn.svm import SVC
+from sklearn.metrics.pairwise import euclidean_distances
 from modAL.utils.data import data_vstack
 from modAL.uncertainty import _proba_uncertainty, classifier_uncertainty
 import scipy
 
 from libplot import plot_classification, plot_poison, c_plot_poison
 from libutil import Metrics, out_dir
-from libstore import store
+from libstore import store, CompressedStore
+from libconfig import Config
+
+
+logger = logging.getLogger(__name__)
 
 
 def active_split(
@@ -162,17 +170,25 @@ class MyActiveLearner:
 
         self.unique_labels = np.unique(Y_test)
 
-        self.stop_function = config.meta.get(
-            "stop_function", ("default", lambda learner: False)
-        )[1]
+        stop_func = config.meta.get("stop_function", ("default", lambda learner: False))
+        self.stop_function = stop_func[1]
+        self.stop_function_name = stop_func[0]
         self.ret_classifiers = config.meta.get("ret_classifiers", False)
         self.stop_info = config.meta.get("stop_info", False)
         self.config_str = config.serialize()
         self.i = i
         self.pool_subsample = config.meta.get("pool_subsample", None)
         self.model = config.model_name.lower()
+        self.dataset_name = config.dataset_name
+
+        self.cleanup_checkpoints = True
 
         self.metrics = Metrics(metrics=metrics)
+
+        # Configuration string for a previous run
+        self.config_str_1000 = self.config_str.replace(
+            self.stop_function_name, "len1000"
+        )
 
         # Validate expected error method
         ee = config.meta.get("ee", "offline")
@@ -287,6 +303,13 @@ class MyActiveLearner:
         else:
             raise Exception("unknown model")
 
+    def stop_function_adapter(self, learner, *args):
+        "Adapter which allows stop functions which don't accept *args"
+        try:
+            return self.stop_function(learner, *args)
+        except TypeError:
+            return self.stop_function(learner)
+
     def active_learn2(self) -> Tuple[list, list]:
         """
         Perform active learning on the given dataset, querying data with the given query strategy.
@@ -303,58 +326,58 @@ class MyActiveLearner:
         checkpoint = self._restore_checkpoint()
 
         if checkpoint is None:
-            self.learner = self.__setup_learner()
-            self.metrics.collect(
-                self.X_labelled.shape[0],
-                self.learner.estimator,
-                self.Y_test,
-                self.X_test,
-            )
+            past_run_1000 = self.try_restore_1000()
+            if past_run_1000 is not None:
+                print("Restoring from previous 1000 instance run")
+                self = past_run_1000
+                # Required so we don't overwrite the classifier file below!
+                checkpoint = True
+            else:
+                self.learner = self.__setup_learner()
+                self.metrics.collect(
+                    self.X_labelled.shape[0],
+                    self.learner.estimator,
+                    self.Y_test,
+                    self.X_test,
+                )
         else:
             print("Restoring from checkpoint")
             self = checkpoint
 
-        # Classifiers are stored as a local and explicitly restored as they need to be compressed before being stored.
+        # Classifiers are stored as a local and explicitly restored as they need to be
+        # compressed before being stored.
         with store(
-            f"{out_dir()}/classifiers/{self.config_str}_{self.i}.zip",
+            f"{out_dir()}/classifiers/{self.config_str_1000}_{self.i}.zip",
             enable=self.ret_classifiers,
             restore=checkpoint is not None,
         ) as classifiers:
             # Initial subsampling, this should probably be done somewhere else tbh...
             if checkpoint is None:
-                if self.pool_subsample is not None:
-                    # TODO: Should this random be seeded?
-                    self.X_subsampled = self.X_unlabelled[
-                        np.random.choice(
-                            self.X_unlabelled.shape[0],
-                            self.pool_subsample,
-                            replace=False,
-                        )
-                    ]
-                else:
-                    self.X_subsampled = self.X_unlabelled
+                self._update_subsample()
 
             if self.ret_classifiers and len(classifiers) == 0:
-                # Store the unlabelled pool with the classifier
-                # self.learner.y_unlabelled = self.Y_oracle
-                # self.learner.X_unlabelled = self.X_unlabelled
                 classifiers.append(deepcopy(self.learner))
 
             # Do the active learning!
-            while self.X_unlabelled.shape[0] != 0 and not self.stop_function(
-                self.learner
+            # Need to make sure we check the stop function before writing to any result files
+            # in case we restore from a past 1000 checkpoint (because we no longer delete them)
+            # even though we don't need to do any more work.
+
+            # TODO: Change mandatory check to >= 500 if we keep the reserve?
+            while self.X_unlabelled.shape[0] >= 10 and not self.stop_function_adapter(
+                self.learner, self.metrics
             ):
 
                 self.active_learn_iter(classifiers)
 
-        # Write the experiment run results and cleanup intermediate checkpoints
+        # Write the experiment run results and (possibly) cleanup intermediate checkpoints
         self._write_run(self.metrics)
         self._cleanup_checkpoint()
 
         return self.metrics
 
     def active_learn_iter(self, classifiers):
-        # QUERY  ------------------------------------------------------------------------------------------------------------------------------------------
+        # QUERY  -------------------------------------------------------------------------------------
         t_start = time.monotonic()
         if not self.stop_info:
             query_idx, query_points = self.learner.query(self.X_subsampled)
@@ -365,7 +388,7 @@ class MyActiveLearner:
             )
         t_elapsed = time.monotonic() - t_start
 
-        # PRE METRICS  -----------------------------------------------------------------------------------------------------------------------------------
+        # PRE METRICS  -------------------------------------------------------------------------------
 
         t_ee_start = time.monotonic()
         if any(
@@ -387,7 +410,7 @@ class MyActiveLearner:
             predictions = self.learner.predict(query_points)
             uncertainties = classifier_uncertainty(self.learner.estimator, query_points)
 
-        # TRAIN  ------------------------------------------------------------------------------------------------------------------------------------------
+        # TRAIN  -------------------------------------------------------------------------------------
 
         if query_points is not None and getattr(
             self.query_strategy, "is_adversarial", False
@@ -396,7 +419,7 @@ class MyActiveLearner:
 
         self.learner.teach(self.X_unlabelled[query_idx], self.Y_oracle[query_idx])
 
-        # POST METRICS  -----------------------------------------------------------------------------------------------------------------------------------
+        # POST METRICS  ------------------------------------------------------------------------------
 
         if "contradictory_information" in self.metrics.metrics:
             contradictory_information = np.sum(
@@ -417,17 +440,7 @@ class MyActiveLearner:
 
         # Resubsample the unlabelled pool. This must happen after we retrain but before metrics are calculated
         # as the subsampled unlabelled pool must be disjoint from the trained instances.
-        if self.pool_subsample is not None:
-            # TODO: Should this random be seeded?
-            self.X_subsampled = self.X_unlabelled[
-                np.random.choice(
-                    self.X_unlabelled.shape[0],
-                    min(self.pool_subsample, self.X_unlabelled.shape[0]),
-                    replace=False,
-                )
-            ]
-        else:
-            self.X_subsampled = self.X_unlabelled
+        self._update_subsample()
 
         extra_metrics["time_total"] = time.monotonic() - t_start
 
@@ -449,6 +462,18 @@ class MyActiveLearner:
 
         self._checkpoint(self)
 
+    def _update_subsample(self):
+        if self.pool_subsample is not None:
+            self.X_subsampled = self.X_unlabelled[
+                np.random.choice(
+                    self.X_unlabelled.shape[0],
+                    min(self.pool_subsample, self.X_unlabelled.shape[0]),
+                    replace=False,
+                )
+            ]
+        else:
+            self.X_subsampled = self.X_unlabelled
+
     def _checkpoint(self, data):
         file = f"{out_dir()}/checkpoints/{self.config_str}_{self.i}.pickle"
         for _i in range(3):
@@ -459,6 +484,65 @@ class MyActiveLearner:
             except Exception:
                 print(f"Failed attempt {i+1} of 3 to write to checkpoint {file}")
                 pass
+
+    def try_restore_1000(self):
+        "Try to restore from a previous run that was terminated at 1000 instances."
+        # This is a bad way to do it, but it is what it is. We only have ~5 spare characters
+        # in the result filenames.
+        if self.stop_function_name == "len1000":
+            return None
+
+        try:
+            # If in future we need to restore again from runs this is where the test needs to happen
+            # though in this case we should have checkpoints (as we don't remove them for resumed runs)
+            # so it'll be a bit easier (& faster).
+            print(f"Reading past result from {self.config_str_1000} ({self.i})")
+            cached_config, metrics_list = self._read_result(
+                self.config_str_1000, runs=[self.i]
+            )
+            metrics = metrics_list[0]  # first and only requested run
+            classifiers = self.__read_classifiers(self.config_str_1000, i=self.i)
+        except FileNotFoundError:
+            print("Could not restore from 1000 instance run")
+            return None
+
+        assert (
+            len(classifiers) == 100
+        ), f"Could not restore from 1000 instance run as it has {len(classifiers)}!=100 iterations"
+        assert (
+            len(metrics.x) == 100
+        ), f"Could not restore from 1000 instance run as it has {len(metrics.x)}!=100 iterations"
+
+        self.metrics.frame = metrics
+        dense_atol = 1e-1 if self.dataset_name == "swarm" else 1e-3
+        self.X_unlabelled, self.Y_oracle = reconstruct_last_unlabelled(
+            classifiers, self.X_unlabelled, self.Y_oracle, dense_atol=dense_atol
+        )
+        self.learner = classifiers[-1]
+
+        classifiers.close()
+
+        self._update_subsample()
+        self.cleanup_checkpoints = False
+
+        return self
+
+    def _read_result(self, config_str, runs):
+        results = []
+        for name in [f"{out_dir()}{os.path.sep}{config_str}_{i}.csv" for i in runs]:
+            with open(name, "r") as f:
+                cached_config = Config(
+                    **{"model_name": "svm-linear", **json.loads(f.readline())}
+                )
+                results.append(pd.read_csv(f, index_col=0))
+        # make the run numbers available
+        cached_config.runs = runs
+        return cached_config, results
+
+    def __read_classifiers(self, config_str, i):
+        zfile = f"{out_dir()}{os.path.sep}classifiers{os.path.sep}{config_str}_{i}.zip"
+
+        return CompressedStore(zfile, read=True)
 
     def _restore_checkpoint(self):
         file = f"{out_dir()}/checkpoints/{self.config_str}_{self.i}.pickle"
@@ -472,10 +556,13 @@ class MyActiveLearner:
 
     def _cleanup_checkpoint(self):
         file = f"{out_dir()}/checkpoints/{self.config_str}_{self.i}.pickle"
-        try:
-            os.remove(file)
-        except FileNotFoundError:
-            pass
+        if self.cleanup_checkpoints:
+            try:
+                os.remove(file)
+            except FileNotFoundError:
+                pass
+        else:
+            print(f"Cleaning checkpoints disabled, not removing {file}")
 
     def _write_run(self, data):
         file = f"{out_dir()}/runs/{self.config_str}_{self.i}.csv"
@@ -584,3 +671,105 @@ def csr_vappend(a, b):
     a.indptr = np.hstack((a.indptr, (b.indptr + a.nnz)[1:]))
     a._shape = (a.shape[0] + b.shape[0], b.shape[1])
     return a
+
+
+def reconstruct_last_unlabelled(clfs, X_unlabelled, Y_oracle, dense_atol=1e-6):
+    """
+    Reconstruct the last unlabelled pool from stored information.
+
+    This is used to resume experiments that were terminated at 1000 instances.
+    """
+    # Defensive asserts
+    assert clfs is not None, "Classifiers must be non-none"
+    assert len(clfs) == 100
+    assert X_unlabelled is not None, "X_unlabelled must be non-none"
+    assert Y_oracle is not None, "Y_oracle must be non-none"
+    assert (
+        X_unlabelled.shape[0] == Y_oracle.shape[0]
+    ), "unlabelled and oracle pools have a different shape"
+
+    # Fast row-wise compare function
+    def compare(A, B, sparse):
+        "https://stackoverflow.com/questions/23124403/how-to-compare-2-sparse-matrix-stored-using-scikit-learn-library-load-svmlight-f"
+        if sparse:
+            pairs = np.where(
+                np.isclose(
+                    (np.array(A.multiply(A).sum(1)) + np.array(B.multiply(B).sum(1)).T)
+                    - 2 * A.dot(B.T).toarray(),
+                    0,
+                )
+            )
+            # TODO: Assert A[A_idx] == B[B_idx] for all pairs? Harder with sparse matrices.
+        else:
+            dists = euclidean_distances(A, B, squared=True)
+            pairs = np.where(np.isclose(dists, 0, atol=1e-1, rtol=0))
+            pairs = np.array(
+                [
+                    [A_idx, B_idx]
+                    for A_idx, B_idx in zip(*pairs)
+                    if (A[A_idx] == B[B_idx]).all()
+                ]
+            ).T
+
+        return pairs
+
+    clf = clfs[-1]
+    assert clf.X_training.shape[0] == 1000, f"{clf.X_training.shape[0]} == 1000"
+
+    equal_rows = list(
+        compare(
+            X_unlabelled,
+            clf.X_training,
+            sparse=isinstance(X_unlabelled, scipy.sparse.csr_matrix),
+        )
+    )
+
+    # Unlike in reconstruct_unlabelled we are doing this in one shot, and are looking
+    # for all instances which need to be removed. This is eqaul to 1000 minus the
+    # initial set size which were never present in the unlabelled pool.
+    target_n = 1000 - clfs[0].X_training.shape[0]
+
+    # Some datasets (rcv1) contain duplicates. These were only queried once, so we
+    # make sure we only remove a single copy from the unlabelled pool.
+    if len(equal_rows[0]) > target_n:
+        logger.debug(f"Found {len(equal_rows[0])} equal rows")
+        really_equal_rows = []
+        for clf_idx in np.unique(equal_rows[1]):
+            dupes = equal_rows[0][equal_rows[1] == clf_idx]
+            # some datasets have duplicates with differing labels (rcv1)
+            dupes_correct_label = dupes[
+                (Y_oracle[dupes] == clf.y_training[clf_idx])
+                &
+                # this check is necessary so we don't mark an instance for removal twice
+                # when we want to mark another duplicate
+                np.logical_not(np.isin(dupes, really_equal_rows))
+            ][0]
+            really_equal_rows.append(dupes_correct_label)
+        logger.debug(f"Found {len(really_equal_rows)} really equal rows")
+
+    elif len(equal_rows[0]) == target_n:
+        # Fast path with no duplicates
+        assert (Y_oracle[equal_rows[0]] == clf.y_training[equal_rows[1]]).all()
+        really_equal_rows = equal_rows[0]
+    else:
+        raise Exception(
+            f"Less than {target_n} ({len(equal_rows[0])}) equal rows were found."
+            + " This could indicate an issue with the row-wise compare"
+            + " function."
+        )
+
+    assert (
+        len(really_equal_rows) == target_n
+    ), f"{len(really_equal_rows)}=={target_n} (target)"
+
+    n_before = X_unlabelled.shape[0]
+    if isinstance(X_unlabelled, scipy.sparse.csr_matrix):
+        X_unlabelled = delete_from_csr(X_unlabelled, really_equal_rows)
+    else:
+        X_unlabelled = np.delete(X_unlabelled, really_equal_rows, axis=0)
+    Y_oracle = np.delete(Y_oracle, really_equal_rows, axis=0)
+    assert (
+        X_unlabelled.shape[0] == n_before - target_n
+    ), f"We found 10 equal rows but {n_before-X_unlabelled.shape[0]} were removed"
+
+    return (X_unlabelled.copy(), Y_oracle)

@@ -4,7 +4,6 @@ import math
 import pickle
 import socket
 from time import monotonic
-from dataclasses import dataclass
 from typing import Dict, Any, Callable
 import json
 import math
@@ -35,6 +34,7 @@ from libstop import first_acc, no_ahead_tvregdiff
 from libplot import align_yaxis
 from libactive import active_split, MyActiveLearner
 from libstore import CompressedStore
+from libconfig import Config, Configurations
 
 
 DEFAULT_METRICS = [
@@ -61,81 +61,6 @@ DEFAULT_METRICS = [
     "expected_error_average",
     "expected_error_variance",
 ]
-
-
-@dataclass
-class Config:
-    dataset_name: str
-    method_name: str
-    dataset_mutator_name: str
-    model_name: str
-    meta: Dict["str", Any]
-    method: Callable = None
-    dataset: Callable = None
-    dataset_mutator: Callable = None
-
-    def serialize(self):
-        meta_str = "__".join(
-            [
-                f"{k}={v}" if k != "stop_function" else f"{k}={v[0]}"
-                for k, v in self.meta.items()
-            ]
-        )
-        return f"{self.dataset_name}__{self.dataset_mutator_name}__{self.method_name}__{self.model_name}__{meta_str}"
-
-    def json(self):
-        return {
-            "dataset_name": self.dataset_name,
-            "method_name": self.method_name,
-            "dataset_mutator_name": self.dataset_mutator_name,
-            "model_name": self.model_name,
-            "meta": {
-                k: v if k != "stop_function" else v[0] for k, v in self.meta.items()
-            },
-        }
-
-    def __repr__(self):
-        return pformat(self.json())
-
-
-class Configurations:
-    def __init__(self, matrix):
-        self.configurations = []
-        self.meta = matrix["meta"]
-
-        for dataset in matrix["datasets"]:
-            for method in matrix["methods"]:
-                for model in matrix["models"]:
-                    for dataset_mutator in matrix["dataset_mutators"].items():
-                        self.configurations.append(
-                            Config(
-                                dataset_name=dataset[0],
-                                dataset=dataset[1],
-                                method_name=method[0],
-                                method=method[1],
-                                dataset_mutator_name=dataset_mutator[0],
-                                dataset_mutator=dataset_mutator[1],
-                                model_name=model,
-                                meta=matrix["meta"],
-                            )
-                        )
-
-    def __repr__(self):
-        return pformat(
-            {
-                "meta": self.meta.__repr__(),
-                "configurations": self.configurations.__repr__(),
-            }
-        )
-
-    def __iter__(self, *args, **kwargs):
-        return self.configurations.__iter__(*args, **kwargs)
-
-    def __getitem__(self, *args, **kwargs):
-        return self.configurations.__getitem__(*args, **kwargs)
-
-    def __len__(self):
-        return len(self.configurations)
 
 
 def run(
@@ -686,12 +611,15 @@ def __write_result(config, result, runs):
 
 
 def __read_classifiers(config, i=None):
+    if config.meta["stop_function"][0] != "len1000":
+        c_str = config.serialize().replace(config.meta["stop_function"][0], "len1000")
+    else:
+        c_str = config.serialize()
+
     pfile = (
         f"{out_dir()}{os.path.sep}classifiers{os.path.sep}{config.serialize()}.pickle"
     )
-    zfile = (
-        f"{out_dir()}{os.path.sep}classifiers{os.path.sep}{config.serialize()}_{i}.zip"
-    )
+    zfile = f"{out_dir()}{os.path.sep}classifiers{os.path.sep}{c_str}_{i}.zip"
     try:
         with open(pfile, "rb") as f:
             return pickle.load(f)

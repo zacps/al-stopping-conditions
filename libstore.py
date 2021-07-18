@@ -71,11 +71,15 @@ class CompressedStore:
                 raise IndexError(f"index {i} out of range for store of length {self.i}")
 
         if i < 0:
-            i = self.i - 1 - i
+            # print(f"Negative index {i} for len {self.i} gives a filename of {self.i+i}")
+            i = self.i + i
         try:
             return pickle.Unpickler(self.zip.open(str(i))).load()
         except KeyError:
             raise IndexError(f"index {i} out of range for store of length {self.i}")
+
+    def indexes(self):
+        return self.zip.namelist()
 
     # As written this is a single use iterable, create a closure here which keeps an ephemeral counter.
     def __iter__(self):
