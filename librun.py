@@ -184,6 +184,7 @@ def plot(
     figsize=(18, 4),
     extra=0,
     scale="linear",
+    hlines=None
 ):
     if key is None:
         key = lambda config_result: (
@@ -241,6 +242,12 @@ def plot(
                         yerr=result.iloc[:, i_stderr + i] if has_stderr else None,
                         label=f"{series(config)}" if i == 0 else "",
                     )
+                    
+                if hlines is not None:
+                    line = hlines.get(config.dataset_name, None)
+                    if line is not None:
+                        ax.axhline(line[i])
+                    
                 ax.set_xlabel("Instances")
                 ax.set_ylabel(["Accuracy", "F1", "AUC ROC", "Empirical Robustness"][i])
                 ax.set_yscale(scale)
