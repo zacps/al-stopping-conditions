@@ -20,7 +20,6 @@ try:
 except ModuleNotFoundError:
     pass
 from modAL import disagreement
-from modAL.models import ActiveLearner, Committee
 from sklearn.gaussian_process import GaussianProcessClassifier
 from sklearn.linear_model import LogisticRegression
 from sklearn.model_selection import train_test_split
@@ -44,6 +43,7 @@ from libplot import plot_classification, plot_poison, c_plot_poison
 from libutil import Metrics, out_dir
 from libstore import store, CompressedStore
 from libconfig import Config
+from modal_learner import IndexLearner
 
 
 logger = logging.getLogger(__name__)
@@ -160,12 +160,19 @@ class MyActiveLearner:
         metrics=None,
         i=None,
     ):
-        self.X_labelled = X_labelled
-        self.X_unlabelled = X_unlabelled
-        self.Y_labelled = Y_labelled
-        self.Y_oracle = Y_oracle
+        # Varying sets
+        self._initial_X_labelled = X_labelled
+        self._initial_X_unlabelled = X_unlabelled
+        self._initial_Y_labelled = Y_labelled
+        self._initial_Y_oracle = Y_oracle
+
+        # Associated index sets
+        self._taught_idx = np.array([], dtype=int)
+
+        # Constant sets
         self.X_test = X_test
         self.Y_test = Y_test
+
         self.query_strategy = query_strategy
 
         self.unique_labels = np.unique(Y_test)
@@ -200,105 +207,44 @@ class MyActiveLearner:
             raise ValueError(f"ee must be online or offline, got {ee}")
 
     def __setup_learner(self):
+        kwargs = {
+            "X_training": self.X_labelled,
+            "y_training": self.Y_labelled,
+            "X_unlabelled": self._initial_X_unlabelled,
+            "y_unlabelled": self._initial_Y_oracle,
+            "query_strategy": self.query_strategy,
+        }
         if self.model == "svm-linear":
-            return ActiveLearner(
-                estimator=SVC(kernel="linear", probability=True),
-                X_training=self.X_labelled,
-                y_training=self.Y_labelled,
-                query_strategy=self.query_strategy,
+            return IndexLearner(
+                estimator=SVC(kernel="linear", probability=True), **kwargs
             )
         elif self.model == "thunder-svm-linear":
-            return ActiveLearner(
-                estimator=ThunderSVC(kernel="linear", probability=True),
-                X_training=self.X_labelled,
-                y_training=self.Y_labelled,
-                query_strategy=self.query_strategy,
+            return IndexLearner(
+                estimator=ThunderSVC(kernel="linear", probability=True), **kwargs
             )
         elif self.model == "svm-rbf":
-            return ActiveLearner(
-                estimator=SVC(kernel="rbf", probability=True),
-                X_training=self.X_labelled,
-                y_training=self.Y_labelled,
-                query_strategy=self.query_strategy,
-            )
+            return IndexLearner(estimator=SVC(kernel="rbf", probability=True), **kwargs)
         elif self.model == "svm-poly":
-            return ActiveLearner(
-                estimator=SVC(kernel="poly", probability=True),
-                X_training=self.X_labelled,
-                y_training=self.Y_labelled,
-                query_strategy=self.query_strategy,
+            return IndexLearner(
+                estimator=SVC(kernel="poly", probability=True), **kwargs
             )
         elif self.model == "random-forest":
-            return ActiveLearner(
-                estimator=RandomForestClassifier(),
-                X_training=self.X_labelled,
-                y_training=self.Y_labelled,
-                query_strategy=self.query_strategy,
-            )
+            return IndexLearner(estimator=RandomForestClassifier(), **kwargs)
         elif self.model == "decision-tree":
-            return ActiveLearner(
-                estimator=DecisionTreeClassifier(),
-                X_training=self.X_labelled,
-                y_training=self.Y_labelled,
-                query_strategy=self.query_strategy,
-            )
+            return IndexLearner(estimator=DecisionTreeClassifier(), **kwargs)
         elif self.model == "gaussian-nb":
-            return ActiveLearner(
-                estimator=GaussianNB(),
-                X_training=self.X_labelled,
-                y_training=self.Y_labelled,
-                query_strategy=self.query_strategy,
-            )
+            return IndexLearner(estimator=GaussianNB(), **kwargs)
         elif self.model == "k-neighbors":
-            return ActiveLearner(
-                estimator=KNeighborsClassifier(),
-                X_training=self.X_labelled,
-                y_training=self.Y_labelled,
-                query_strategy=self.query_strategy,
-            )
+            return IndexLearner(estimator=KNeighborsClassifier(), **kwargs)
         elif self.model == "perceptron":
-            return ActiveLearner(
-                estimator=Perceptron(),
-                X_training=self.X_labelled,
-                y_training=self.Y_labelled,
-                query_strategy=self.query_strategy,
-            )
+            return IndexLearner(estimator=Perceptron(), **kwargs)
         elif self.model == "neural-network":
-            return ActiveLearner(
+            return IndexLearner(
                 estimator=MLPClassifier(
                     hidden_layer_sizes=(100,),  # default
                     activation="relu",  # default
                 ),
-                X_training=self.X_labelled,
-                y_training=self.Y_labelled,
-                query_strategy=self.query_strategy,
-            )
-        elif self.model == "committee":
-            return Committee(
-                learner_list=[
-                    ActiveLearner(
-                        estimator=SVC(kernel="linear", probability=True),
-                        X_training=self.X_labelled,
-                        y_training=self.Y_labelled,
-                    ),
-                    # committee: logistic regression, svm-linear, svm-rbf, guassian process classifier
-                    ActiveLearner(
-                        estimator=SVC(kernel="rbf", probability=True),
-                        X_training=self.X_labelled,
-                        y_training=self.Y_labelled,
-                    ),
-                    ActiveLearner(
-                        estimator=GaussianProcessClassifier(),
-                        X_training=self.X_labelled,
-                        y_training=self.Y_labelled,
-                    ),
-                    ActiveLearner(
-                        estimator=LogisticRegression(),
-                        X_training=self.X_labelled,
-                        y_training=self.Y_labelled,
-                    ),
-                ],
-                query_strategy=disagreement.vote_entropy_sampling,
+                **kwargs,
             )
         else:
             raise Exception("unknown model")
@@ -342,12 +288,19 @@ class MyActiveLearner:
                 )
         else:
             print("Restoring from checkpoint")
-            self = checkpoint
+            # FIXME: Does this actually work how I expect...?
+            self.__dict__ = checkpoint.__dict__
+            # self = checkpoint
 
         # Classifiers are stored as a local and explicitly restored as they need to be
         # compressed before being stored.
         with store(
             f"{out_dir()}/classifiers/{self.config_str_1000}_{self.i}.zip",
+            # References to these are held in stores
+            self._initial_X_labelled,
+            self._initial_X_unlabelled,
+            self._initial_Y_labelled,
+            self._initial_Y_oracle,
             enable=self.ret_classifiers,
             restore=checkpoint is not None,
         ) as classifiers:
@@ -365,7 +318,7 @@ class MyActiveLearner:
 
             # TODO: Change mandatory check to >= 500 if we keep the reserve?
             while self.X_unlabelled.shape[0] >= 10 and not self.stop_function_adapter(
-                self.learner, self.metrics
+                self.learner, self.metrics, self
             ):
 
                 self.active_learn_iter(classifiers)
@@ -379,13 +332,7 @@ class MyActiveLearner:
     def active_learn_iter(self, classifiers):
         # QUERY  -------------------------------------------------------------------------------------
         t_start = time.monotonic()
-        if not self.stop_info:
-            query_idx, query_points = self.learner.query(self.X_subsampled)
-            extra_metrics = {}
-        else:
-            query_idx, query_points, extra_metrics = self.learner.query(
-                self.X_subsampled
-            )
+        query_idx, query_points, extra_metrics = self.learner.query(self.X_subsampled)
         t_elapsed = time.monotonic() - t_start
 
         # PRE METRICS  -------------------------------------------------------------------------------
@@ -412,12 +359,9 @@ class MyActiveLearner:
 
         # TRAIN  -------------------------------------------------------------------------------------
 
-        if query_points is not None and getattr(
-            self.query_strategy, "is_adversarial", False
-        ):
-            self.learner.teach(query_points, self.Y_oracle[query_idx])
-
-        self.learner.teach(self.X_unlabelled[query_idx], self.Y_oracle[query_idx])
+        # This has the effect of applying the subsampled index to the unlabelled pool then
+        # applying the query index
+        self.learner.teach(self._index_X_subsampled[query_idx])
 
         # POST METRICS  ------------------------------------------------------------------------------
 
@@ -428,15 +372,10 @@ class MyActiveLearner:
             )
             extra_metrics["contradictory_information"] = contradictory_information
 
-        # Replace with non-copying slice?
-        if isinstance(self.X_unlabelled, csr_matrix):
-            self.X_unlabelled = delete_from_csr(
-                self.X_unlabelled, row_indices=query_idx
-            )
-        else:
-            self.X_unlabelled = np.delete(self.X_unlabelled, query_idx, axis=0)
-
-        self.Y_oracle = np.delete(self.Y_oracle, query_idx, axis=0)
+        # Update taught instances
+        self._taught_idx = np.concatenate(
+            (self._taught_idx, self._index_X_subsampled[query_idx])
+        )
 
         # Resubsample the unlabelled pool. This must happen after we retrain but before metrics are calculated
         # as the subsampled unlabelled pool must be disjoint from the trained instances.
@@ -456,23 +395,65 @@ class MyActiveLearner:
         )
 
         if self.ret_classifiers:
-            # self.learner.y_unlabelled = self.Y_oracle
-            # self.learner.X_unlabelled = self.X_unlabelled
             classifiers.append(self.learner)
 
         self._checkpoint(self)
 
     def _update_subsample(self):
+        mask = np.ones(self._initial_X_unlabelled.shape[0], dtype=bool)
+        mask[self._taught_idx] = False
+        indexes = np.where(mask)[0]
         if self.pool_subsample is not None:
-            self.X_subsampled = self.X_unlabelled[
-                np.random.choice(
-                    self.X_unlabelled.shape[0],
-                    min(self.pool_subsample, self.X_unlabelled.shape[0]),
-                    replace=False,
-                )
-            ]
+            self._index_X_subsampled = np.random.choice(
+                indexes,
+                min(self.pool_subsample, self.X_unlabelled.shape[0]),
+                replace=False,
+            )
         else:
-            self.X_subsampled = self.X_unlabelled
+            self._index_X_subsampled = indexes
+
+    @property
+    def X_subsampled(self):
+        return self._initial_X_unlabelled[self._index_X_subsampled]
+
+    @property
+    def y_subsampled(self):
+        return self._initial_y_unlabelled[self._index_X_subsampled]
+
+    @property
+    def X_unlabelled(self):
+        mask = np.ones(self._initial_X_unlabelled.shape[0], dtype=bool)
+        mask[self._taught_idx] = False
+        return self._initial_X_unlabelled[mask]
+
+    @property
+    def Y_oracle(self):
+        mask = np.ones(self._initial_X_unlabelled.shape[0], dtype=bool)
+        mask[self._taught_idx] = False
+        return self._initial_Y_oracle[mask]
+
+    @property
+    def X_labelled(self):
+        if isinstance(self._initial_X_labelled, csr_matrix):
+            return scipy.sparse.vstack(
+                (self._initial_X_labelled, self._initial_X_unlabelled[self._taught_idx])
+            )
+        else:
+            return data_vstack(
+                (self._initial_X_labelled, self._initial_X_unlabelled[self._taught_idx])
+            )
+
+    @property
+    def Y_labelled(self):
+        print(self._taught_idx)
+        if isinstance(self._initial_Y_labelled, csr_matrix):
+            return scipy.sparse.vstack(
+                (self._initial_Y_labelled, self._initial_Y_oracle[self._taught_idx])
+            )
+        else:
+            return data_vstack(
+                (self._initial_Y_labelled, self._initial_Y_oracle[self._taught_idx])
+            )
 
     def _checkpoint(self, data):
         file = f"{out_dir()}/checkpoints/{self.config_str}_{self.i}.pickle"
@@ -487,6 +468,10 @@ class MyActiveLearner:
 
     def try_restore_1000(self):
         "Try to restore from a previous run that was terminated at 1000 instances."
+        # DISABLED
+        if False:
+            return None
+
         # This is a bad way to do it, but it is what it is. We only have ~5 spare characters
         # in the result filenames.
         if self.stop_function_name == "len1000":
