@@ -618,7 +618,7 @@ def __write_result(config, result, runs):
 
 
 def __read_classifiers(config, i=None):
-    if config.meta["stop_function"][0] != "len1000":
+    if False and config.meta["stop_function"][0] != "len1000":
         c_str = config.serialize().replace(config.meta["stop_function"][0], "len1000")
     else:
         c_str = config.serialize()
