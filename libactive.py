@@ -297,7 +297,7 @@ class MyActiveLearner:
         # Classifiers are stored as a local and explicitly restored as they need to be
         # compressed before being stored.
         with store(
-            f"{out_dir()}/classifiers/{self.config_str_1000}_{self.i}.zip",
+            f"{out_dir()}/classifiers/{self.config_str}_{self.i}.zip",
             # References to these are held in stores
             self._initial_X_labelled,
             self._initial_X_unlabelled,
