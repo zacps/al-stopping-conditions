@@ -229,6 +229,8 @@ class Notifier:
         )
 
     def error(self, configurations, duration, e):
+        jobid = os.environ.get('SLURM_JOB_ID', None)
+        jobid_str = f" ({jobid})" if jobid is not None else ""
         return self.notify(
-            f"Run with {len(configurations)} experiments on {socket.gethostname()} **FAILED** after {duration/60/60:.1f}h\n```{e}```"
+            f"Run with {len(configurations)} experiments on {socket.gethostname()} **FAILED** after {duration/60/60:.1f}h{jobid_str}\n```{e}```"
         )
