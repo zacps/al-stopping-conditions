@@ -37,7 +37,7 @@ matrix = {
         ("uncertainty", partial(uncertainty_stop, n_instances=10)),
     ],
     "models": [
-        "svm-linear"
+        "random-forest"
     ],
     "meta": {
         "dataset_size": 1000,
