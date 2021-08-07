@@ -48,7 +48,7 @@ matrix = {
         "ensure_y": True,
         "stop_info": True,
         "aggregate": False,
-        "stop_function": ("res500", lambda learner, matrix, state: state.X_unlabelled.shape[0] < 510,
+        "stop_function": ("res500", lambda learner, matrix, state: state.X_unlabelled.shape[0] < 510),
         "pool_subsample": 1000
     }
 }

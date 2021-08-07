@@ -192,6 +192,8 @@ class MyActiveLearner:
 
         self.metrics = Metrics(metrics=metrics)
 
+        self.iteration = 0
+
         # Configuration string for a previous run
         self.config_str_1000 = self.config_str.replace(
             self.stop_function_name, "len1000"
@@ -330,6 +332,7 @@ class MyActiveLearner:
         return self.metrics
 
     def active_learn_iter(self, classifiers):
+        print(f"Starting iteration {self.iteration}")
         # QUERY  -------------------------------------------------------------------------------------
         t_start = time.monotonic()
         query_idx, query_points, extra_metrics = self.learner.query(self.X_subsampled)
@@ -397,6 +400,8 @@ class MyActiveLearner:
         if self.ret_classifiers:
             classifiers.append(self.learner)
 
+        self.iteration += 1
+
         self._checkpoint(self)
 
     def _update_subsample(self):
@@ -445,7 +450,6 @@ class MyActiveLearner:
 
     @property
     def Y_labelled(self):
-        print(self._taught_idx)
         if isinstance(self._initial_Y_labelled, csr_matrix):
             return scipy.sparse.vstack(
                 (self._initial_Y_labelled, self._initial_Y_oracle[self._taught_idx])
@@ -469,7 +473,7 @@ class MyActiveLearner:
     def try_restore_1000(self):
         "Try to restore from a previous run that was terminated at 1000 instances."
         # DISABLED
-        if False:
+        if True:
             return None
 
         # This is a bad way to do it, but it is what it is. We only have ~5 spare characters
