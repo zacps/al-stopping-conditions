@@ -124,15 +124,15 @@ class CompressedStoreV2:
             with self.zip.open("arrays.npz") as filelike:
                 arrays = loadz(filelike)
                 if initial_X_labelled is not None:
-                    assert np.isequal(initial_X_labelled, arrays["initial_X_labelled"])
+                    assert array_equal(initial_X_labelled, arrays["initial_X_labelled"])
                 if initial_X_unlabelled is not None:
-                    assert np.isequal(
+                    assert array_equal(
                         initial_X_unlabelled, arrays["initial_X_unlabelled"]
                     )
                 if initial_Y_labelled is not None:
-                    assert np.isequal(initial_Y_labelled, arrays["initial_Y_labelled"])
+                    assert array_equal(initial_Y_labelled, arrays["initial_Y_labelled"])
                 if initial_Y_oracle is not None:
-                    assert np.isequal(initial_Y_oracle, arrays["initial_Y_oracle"])
+                    assert array_equal(initial_Y_oracle, arrays["initial_Y_oracle"])
                 self.initial_X_labelled = arrays["initial_X_labelled"]
                 self.initial_X_unlabelled = arrays["initial_X_unlabelled"]
                 self.initial_Y_labelled = arrays["initial_Y_labelled"]
@@ -344,3 +344,8 @@ def loadz(filelike):
         else:
             out[name] = array
     return out
+
+def array_equal(a, b):
+    if isinstance(a, scipy.sparse.csr_matrix):
+        return (a!=b).nnz == 0
+    return np.array_equal(a, b)
