@@ -68,7 +68,6 @@ capture_metrics = [
     "uncertainty_max_selected",
     "uncertainty_variance_selected",
     "entropy_max",
-    "n_support",
     "contradictory_information",
 ]
 
