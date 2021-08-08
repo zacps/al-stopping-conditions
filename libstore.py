@@ -227,7 +227,7 @@ class CompressedStoreV1:
 
     version = 1
 
-    def __init__(self, filename, restore=False, read=False):
+    def __init__(self, filename, *args, restore=False, read=False, **kwargs):
         if read:
             mode = "r"
         elif restore:
