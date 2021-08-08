@@ -28,6 +28,8 @@ from sklearn.utils import check_random_state
 from sklearn.svm import SVC
 from tabulate import tabulate
 
+from traceback_with_variables import activate_by_import
+
 import libdatasets
 from libutil import Metrics, average, Notifier, n_cpus
 from libstop import first_acc, no_ahead_tvregdiff
