@@ -23,13 +23,13 @@ def store(filename, *args, enable=True, restore=False, **kwargs):
 
 
 def find_i(namelist):
-    x = 0
+    x = -1
     for s in namelist:
         try:
             x = max(x, int(s))
         except ValueError:
             pass
-    return x
+    return x+1
 
 
 class CompressedStore:
@@ -143,13 +143,13 @@ class CompressedStoreV2:
     def append(self, obj):
         self.zip.writestr(str(self.i), pickle.dumps(obj))
         assert (
-            len(self.zip.namelist()) - 2 == self.i + 1
+            find_i(self.zip.namelist()) == self.i + 1
         ), f"{find_i(self.zip.namelist())} == {self.i + 1}\n{self.zip.namelist()}"
         # To survive unexpected interrupts (from OS, not exceptions) we need to write the zip, then re-open it in append mode.
         # Otherwise changes will be lost because the finalizer doesn't run.
         self.zip.close()
         self.zip = zipfile.ZipFile(self.filename, "a", compression=zipfile.ZIP_DEFLATED)
-        self.i = find_i(self.zip.namelist()) + 1
+        self.i += 1
 
     def __len__(self):
         return self.i
