@@ -537,7 +537,12 @@ class MyActiveLearner:
         file = f"{out_dir()}/checkpoints/{self.config_str}_{self.i}.pickle"
         try:
             with open(file, "rb") as f:
-                return dill.load(f)
+                my_active_learner = dill.load(f)
+                my_active_learner.learner._X_training = self._initial_X_labelled
+                my_active_learner.learner._y_training = self._initial_Y_labelled
+                my_active_learner.learner._X_unlabelled = self._initial_X_unlabelled
+                my_active_learner.learner._y_unlabelled = self._initial_Y_oracle
+                return my_active_learner
         except FileNotFoundError:
             return None
         except EOFError as e:
