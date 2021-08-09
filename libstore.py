@@ -1,6 +1,7 @@
 import zipfile
 import pickle
 import os
+import time
 from contextlib import contextmanager
 
 import numpy as np
@@ -112,7 +113,7 @@ class CompressedStoreV2:
 
         if mode == "w":
             self.zip.writestr("version", "2")
-            with self.zip.open("arrays.npz", "w") as filelike:
+            with self.zip.open("arrays.npz", "w", force_zip64=True) as filelike:
                 savez(
                     filelike,
                     initial_X_labelled=initial_X_labelled,
