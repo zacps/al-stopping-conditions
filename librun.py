@@ -7,6 +7,7 @@ from time import monotonic
 from typing import Dict, Any, Callable
 import json
 import math
+import subprocess
 from itertools import groupby
 import glob
 from pprint import pprint, pformat
@@ -80,6 +81,10 @@ def run(
     dry_run=False,
 ):
     print(sys.argv)
+    print(
+        "Current commit:",
+        subprocess.run(['git', 'rev-parse', '--short', 'HEAD'], stdout=subprocess.PIPE).stdout.decode('utf-8')
+    )
 
     configurations = Configurations(matrix)
     start = monotonic()
