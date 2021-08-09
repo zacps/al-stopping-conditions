@@ -1,4 +1,5 @@
 from typing import Optional, Callable
+import warnings
 
 import scipy
 import numpy as np
@@ -93,7 +94,7 @@ class IndexLearner(ActiveLearner):
                 del state[attr]
         for k, v in state.items():
             if isinstance(v, scipy.sparse.csr_matrix):
-                raise UserWarning(f"Serialized learner has a sparse matrix field {k}")
+                warnings.warn(f"Serialized learner has a sparse matrix field {k}", UserWarning)
         return state
 
     def __setstate__(self, state):
