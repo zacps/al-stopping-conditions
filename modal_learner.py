@@ -90,11 +90,13 @@ class IndexLearner(ActiveLearner):
         state = self.__dict__.copy()
         clear_attrs = ["_X_training", "_y_training", "X_unlabelled", "y_unlabelled"]
         for attr in clear_attrs:
-            if hasattr(state, attr):
+            if attr in state:
                 del state[attr]
+            else:
+                raise Exception(f"Learner did not have expected field {attr}")
         for k, v in state.items():
             if isinstance(v, scipy.sparse.csr_matrix):
-                warnings.warn(f"Serialized learner has a sparse matrix field {k}", UserWarning)
+                raise Exception(f"Serialized learner has a sparse matrix field {k}")
         return state
 
     def __setstate__(self, state):
