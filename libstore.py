@@ -179,13 +179,13 @@ class CompressedStoreV2:
 
     def set_pools(self, item):
         if not hasattr(item, "initial_X_labelled"):
-            item.initial_X_labelled = self.initial_X_labelled
+            item._X_training = self.initial_X_labelled
         if not hasattr(item, "initial_X_unlabelled"):
-            item.initial_X_unlabelled = self.initial_X_unlabelled
+            item._X_unlabelled = self.initial_X_unlabelled
         if not hasattr(item, "initial_Y_labelled"):
-            item.initial_Y_labelled = self.initial_Y_labelled
+            item._y_training = self.initial_Y_labelled
         if not hasattr(item, "initial_Y_oracle"):
-            item.initial_Y_oracle = self.initial_Y_oracle
+            item._y_unlabelled = self.initial_Y_oracle
 
         return item
 

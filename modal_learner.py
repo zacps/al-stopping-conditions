@@ -28,8 +28,8 @@ class IndexLearner(ActiveLearner):
         on_transformed: bool = False,
         **fit_kwargs,
     ) -> None:
-        self.X_unlabelled = X_unlabelled
-        self.y_unlabelled = y_unlabelled
+        self._X_unlabelled = X_unlabelled
+        self._y_unlabelled = y_unlabelled
 
         # See https://github.com/modAL-python/modAL/issues/103
         self.bootstrap_init = bootstrap_init
@@ -48,11 +48,23 @@ class IndexLearner(ActiveLearner):
 
     @property
     def X_training(self):
-        return data_vstack((self._X_training, self.X_unlabelled[self.taught_idx]))
+        return data_vstack((self._X_training, self._X_unlabelled[self.taught_idx]))
 
     @property
     def y_training(self):
-        return np.concatenate((self._y_training, self.y_unlabelled[self.taught_idx]))
+        return np.concatenate((self._y_training, self._y_unlabelled[self.taught_idx]))
+
+    @property
+    def X_unlabelled(self):
+        mask = np.ones(self._X_unlabelled.shape[0], dtype=bool)
+        mask[self.taught_idx] = False
+        return self._X_unlabelled[mask]
+
+    @property
+    def y_unlabelled(self):
+        mask = np.ones(self._X_unlabelled.shape[0], dtype=bool)
+        mask[self.taught_idx] = False
+        return self._y_unlabelled[mask]
 
     @X_training.setter
     def X_training(self, X):
@@ -81,19 +93,14 @@ class IndexLearner(ActiveLearner):
 
         self.taught_idx = np.concatenate((self.taught_idx, query_idx))
 
-        X_training = data_vstack((self.X_training, self.X_unlabelled[self.taught_idx]))
-        y_training = data_vstack((self.y_training, self.y_unlabelled[self.taught_idx]))
-
-        self.estimator.fit(X_training, y_training, **fit_kwargs)
+        self.estimator.fit(self.X_training, self.y_training, **fit_kwargs)
 
     def __getstate__(self):
         state = self.__dict__.copy()
-        clear_attrs = ["_X_training", "_y_training", "X_unlabelled", "y_unlabelled"]
+        clear_attrs = ["_X_training", "_y_training", "_X_unlabelled", "_y_unlabelled"]
         for attr in clear_attrs:
             if attr in state:
                 del state[attr]
-            else:
-                raise Exception(f"Learner did not have expected field {attr}")
         for k, v in state.items():
             if isinstance(v, scipy.sparse.csr_matrix):
                 raise Exception(f"Serialized learner has a sparse matrix field {k}")
