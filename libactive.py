@@ -40,7 +40,7 @@ from modAL.uncertainty import _proba_uncertainty, classifier_uncertainty
 import scipy
 
 from libplot import plot_classification, plot_poison, c_plot_poison
-from libutil import Metrics, out_dir
+from libutil import Metrics, atomic_write, out_dir
 from libstore import store, CompressedStore
 from libconfig import Config
 from modal_learner import IndexLearner
@@ -461,13 +461,14 @@ class MyActiveLearner:
 
     def _checkpoint(self, data):
         file = f"{out_dir()}/checkpoints/{self.config_str}_{self.i}.pickle"
-        for _i in range(3):
+        for i in range(3):
             try:
-                with open(file, "wb") as f:
+                # Guard against writing partial checkpoints by using an atomic copy.
+                with atomic_write(file, "wb") as f:
                     dill.dump(data, f)
                 break
-            except Exception:
-                print(f"Failed attempt {i+1} of 3 to write to checkpoint {file}")
+            except Exception as e:
+                print(f"Failed attempt {i+1} of 3 to write to checkpoint {file}: {e}")
                 pass
 
     def try_restore_1000(self):

@@ -1,7 +1,9 @@
 import os
 import socket
+import typing
 import requests
 
+from contextlib import contextmanager
 from functools import wraps
 
 import scipy
@@ -207,6 +209,25 @@ def n_cpus():
         cpus = len(os.sched_getaffinity(0))
     return cpus
 
+
+@contextmanager
+def atomic_write(filepath: str, mode: str) -> typing.IO:
+    """ Writeable file object that atomically updates a file (using a temporary file).
+
+    :param filepath: the file path to be opened
+    :param binary: whether to open the file in a binary mode instead of textual
+    """
+
+    tmppath = filepath + '.X'
+    try:
+        with open(tmppath, mode) as file:
+            yield file
+        os.rename(tmppath, filepath)
+    finally:
+        try:
+            os.remove(tmppath)
+        except (IOError, OSError):
+            pass
 
 class Notifier:
     def __init__(self, webhook):
