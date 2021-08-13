@@ -490,6 +490,11 @@ def reconstruct_unlabelled(clfs, X_unlabelled, Y_oracle, dense_atol=1e-6):
         X_unlabelled.shape[0] == Y_oracle.shape[0]
     ), "unlabelled and oracle pools have a different shape"
 
+    # TODO: This check is probably a bit slow, instead we could just check if the store is
+    # version 2?
+    if all(hasattr(clf, "X_unlabelled") for clf in clfs):
+        yield from (clf.X_unlabelled for clf in clfs)
+
     # Fast row-wise compare function
     def compare(A, B, sparse):
         "https://stackoverflow.com/questions/23124403/how-to-compare-2-sparse-matrix-stored-using-scikit-learn-library-load-svmlight-f"
