@@ -47,7 +47,11 @@ class CompressedStore:
                 filename, *args, restore=restore, read=read, **kwargs
             )
 
-        z = zipfile.ZipFile(filename, "r", compression=zipfile.ZIP_DEFLATED)
+        try:
+            z = zipfile.ZipFile(filename, "r", compression=zipfile.ZIP_DEFLATED)
+        except zipfile.BadZipFile as e:
+            print(f"Failed to open compressed store {filename}")
+            raise e
         try:
             version = int(z.read("version"))
         except KeyError:
