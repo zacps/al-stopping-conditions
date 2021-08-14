@@ -199,7 +199,7 @@ class CompressedStoreV2:
     # As written this is a single use iterable, create a closure here which keeps an ephemeral counter.
     def __iter__(self):
         i = 0
-        while i <= self.i:
+        while i < self.i:
             yield self[i]
             i += 1
 
