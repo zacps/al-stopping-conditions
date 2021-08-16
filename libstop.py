@@ -53,7 +53,7 @@ from joblib import Parallel, delayed
 from sklearn.cluster import SpectralClustering
 from sklearn import metrics
 from sklearn.utils import check_random_state
-from sklearn.metrics.pairwise import euclidean_distances
+from sklearn.metrics.pairwise import euclidean_distances, pairwise_kernels
 from sklearn.metrics import roc_auc_score, f1_score, cohen_kappa_score
 from sklearn.preprocessing import LabelEncoder
 from libactive import active_split, delete_from_csr
@@ -227,14 +227,14 @@ def SSNCut_values(
     X_unlabelled,
     Y_oracle,
     m=0.2,
-    affinity="linear",
     dense_atol=1e-6,
     **kwargs,
 ):
     """
     NOTES:
     * They used an RBF svm to match the RBF affinity measure for SpectralClustering
-    * As we carry out experiments on a linear svm we also use a linear affinity matrix (by default)
+    * As we carry out experiments on a linear svm we also use a ~~linear~~ *cosine* affinity matrix (by default)
+    * Cosine is used as our features are not necessarilly normalized
 
     file:///F:/Documents/Zotero/storage/DJGRDXSK/Fu%20and%20Yang%20-%202015%20-%20Low%20density%20separation%20as%20a%20stopping%20criterion%20for.pdf
     """
@@ -246,36 +246,34 @@ def SSNCut_values(
     if len(unique_y) > 2:
         print("WARNING: SSNCut is not designed for non-binary classification")
 
-    clustering = SpectralClustering(n_clusters=unique_y.shape[0], affinity=affinity)
+    clustering = SpectralClustering(n_clusters=unique_y.shape[0], affinity='precomputed')
 
     out = []
-    # Reconstruct the unlabelled pool if this run didn't save the unlabelled pool
-    if hasattr(classifiers[0], "X_unlabelled"):
-        # Don't store all pools in memory, generator expression
-        X_unlabelleds = (clf.X_unlabelled for clf in classifiers)
-    else:
-        X_unlabelleds = reconstruct_unlabelled(
-            classifiers, X_unlabelled, Y_oracle, dense_atol=dense_atol
-        )
+
+    X_unlabelleds = reconstruct_unlabelled(
+        classifiers, X_unlabelled, Y_oracle, dense_atol=dense_atol
+    )
 
     for i, (clf, X_unlabelled) in enumerate(zip(classifiers, X_unlabelleds)):
-        # print(f"{i}/{len(classifiers)}")
-        t0 = time.monotonic()
         # Note: With non-binary classification the value of the decision function is a transformation of the distance...
         order = np.argsort(np.abs(clf.estimator.decision_function(X_unlabelled)))
         M = X_unlabelled[order[: min(1000, int(m * X_unlabelled.shape[0]))]]
 
         y0 = clf.predict(M)
-        # use algorithm 1
-        scipy.sparse.save_npz("M.npz", M)
-        y1 = clustering.fit_predict(M)
+
+        # We use cos+1 as our affinity matrix as we want something that:
+        # * Is linear, to fit the rbf svm/rbf affinity pattern in the paper
+        # * Handles non-normalized samples (rules out linear)
+        # * Is non-negative (condition of scikit-learn's implementation)
+        affinity = pairwise_kernels(M, metric="cosine")+1
+        assert np.all(affinity >= 0)
+        y1 = clustering.fit_predict(affinity)
 
         y0 = LabelEncoder().fit_transform(y0)
         diff = np.sum(y0 == y1) / X_unlabelled.shape[0]
         if diff > 0.5:
             diff = 1 - diff
         out.append(diff)
-        # print(f"SSNCut took {time.monotonic()-t0}")
 
     return out
 
@@ -994,7 +992,7 @@ def __is_approx_minimum(value, stable_iters=3, threshold=0, **kwargs):
 # ----------------------------------------------------------------------------------------------
 
 
-def eval_stopping_conditions(results_plots, classifiers, conditions=None):
+def eval_stopping_conditions(results_plots, classifiers, conditions=None, recompute=[]):
     if conditions is None:
         params = {"kappa": {"k": 2}}
         conditions = {
@@ -1020,6 +1018,7 @@ def eval_stopping_conditions(results_plots, classifiers, conditions=None):
         if (
             name in stop_results[conf.dataset_name]
             and len(stop_results[conf.dataset_name][name]) > j
+            and name not in recompute
         ):
             if isinstance(stop_results[conf.dataset_name][name][j], list) or isinstance(
                 stop_results[conf.dataset_name][name][j], tuple
