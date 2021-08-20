@@ -1045,6 +1045,7 @@ def eval_stopping_conditions(results_plots, classifiers, conditions=None, recomp
             raise e
 
     for (clfs, (conf, metrics)) in zip(classifiers, results_plots):
+        logger.info("Starting %s %s", conf.model_name, conf.dataset_name)
         stop_results[conf.dataset_name] = __read_stopping(conf.serialize())
 
         X, y = getattr(libdatasets, conf.dataset_name)(None)
@@ -1114,6 +1115,7 @@ def eval_stopping_conditions(results_plots, classifiers, conditions=None, recomp
                     f"condition {list(conditions.keys())[i]} returned on dataset {conf.dataset_name}:\n{results[:,i]}"
                 )
                 raise e
+        logger.info("Saving stop results to %s", conf.serialize())
         __write_stopping(conf.serialize(), stop_results[conf.dataset_name])
 
     return (conditions, stop_results)
