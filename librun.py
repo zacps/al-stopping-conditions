@@ -458,7 +458,7 @@ def __run_inner(
 
 
 def plot_stop(
-    plots, classifiers, stop_conditions, stop_results, scale="linear", figsize=(26, 4)
+    plots, classifiers, stop_conditions, stop_results, scale="linear", plot_passive=False, figsize=(26, 4)
 ):
     figaxes = plot(plots, ret=True, sort=False, extra=2, scale=scale, figsize=figsize)
     for i, (fig, ax) in enumerate(figaxes):
@@ -471,7 +471,7 @@ def plot_stop(
                     f"short classifier file: {plots[i][0].serialize()}_{j}.zip\nIt has length {len(clfs_)} when it should have length 100"
                 )
 
-        if plots[i][0].dataset_mutator_name != "none":
+        if plots[i][0].dataset_mutator_name != "none" and plot_passive:
             scores = __get_passive_scores(plots[i][0], range(len(plots[i][1])))
             for ax, score in zip(ax, scores):
                 ax.axhline(score, color="tab:gray", ls="--")

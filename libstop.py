@@ -38,18 +38,23 @@ Which take a threshold and a number of iterations for which the value should be 
 
 """
 
+from collections import namedtuple
 import time
 import itertools
 import os
 import logging
+from abc import ABC, abstractmethod
+from dataclasses import dataclass
 from functools import partial
 import operator
+from typing import Callable, List, Type
 
 import dill
 import numpy as np
 import pandas as pd
 import scipy
 from joblib import Parallel, delayed
+from scipy.sparse import data
 from sklearn.cluster import SpectralClustering
 from sklearn import metrics
 from sklearn.utils import check_random_state
@@ -65,6 +70,7 @@ from modAL.uncertainty import classifier_entropy
 
 import libdatasets
 from libutil import out_dir, listify
+from libconfig import Config
 
 
 logger = logging.getLogger(__name__)
@@ -80,19 +86,48 @@ class InvalidAssumption(Exception):
         super().__init__(f"{method} could not be evaluated because: {reason}")
 
 
-def SC_entropy_mcs(x, entropy_max, threshold=0.01, **kwargs):
+class Criteria(ABC):
+    @abstractmethod
+    def metric(self, **kwargs):
+        pass
+
+    @abstractmethod
+    def condition(self, x, metric):
+        pass
+
+    @property
+    def display_name(self) -> str:
+        return getattr(self, "display_name", type(self).__name__)
+
+    @classmethod
+    def all_criteria(cls) -> List[Type]:
+        # https://stackoverflow.com/questions/3862310/how-to-find-all-the-subclasses-of-a-class-given-its-name
+        return set(cls.__subclasses__()).union(
+        [s for c in cls.__subclasses__() for s in cls.all_criteria(c)])
+
+
+@dataclass
+class SC_entropy_mcs(Criteria):
     """
     Determine a stopping point based on when *all* samples in the unlabelled pool are
     below a threshold.
 
     https://www.aclweb.org/anthology/I08-1048.pdf
     """
-    if not (entropy_max <= threshold).any():
-        raise FailedToTerminate("SC_entropy_mcs")
-    return x.iloc[np.argmax(entropy_max <= threshold)]
+
+    threshold: int = 0.01
+
+    def metric(self, entropy_max, *kwargs):
+        return entropy_max
+
+    def condition(self, x, metric):
+        if not (metric <= self.threshold).any():
+            raise FailedToTerminate("SC_entropy_mcs")
+        return x.iloc[np.argmax(metric <= self.threshold)]
 
 
-def SC_oracle_acc_mcs_values(classifiers, pre=None, **kwargs):
+@dataclass
+class SC_oracle_acc_mcs(Criteria):
     """
     Determine a stopping point based on when the accuracy of the current classifier on the
     just-labelled samples is above a threshold.
@@ -100,46 +135,48 @@ def SC_oracle_acc_mcs_values(classifiers, pre=None, **kwargs):
     https://www.aclweb.org/anthology/I08-1048.pdf
     """
 
-    return pre if pre is not None else acc(classifiers, nth="last")[1]
+    threshold: int = 0.9
+
+    def metric(self, classifiers, **kwargs):
+        return acc(classifiers, nth="last")[1]
 
 
-def SC_oracle_acc_mcs(x, classifiers, threshold=0.9, **kwargs):
-    """
-    Determine a stopping point based on when the accuracy of the current classifier on the
-    just-labelled samples is above a threshold.
+    def condition(self, x, metric):
+        """
+        Determine a stopping point based on when the accuracy of the current classifier on the
+        just-labelled samples is above a threshold.
 
-    https://www.aclweb.org/anthology/I08-1048.pdf
-    """
+        https://www.aclweb.org/anthology/I08-1048.pdf
+        """
 
-    accx, acc_ = acc(classifiers, nth="last")
-    try:
-        return accx[np.argmax(np.array(acc_)[1:] >= threshold) + 1]
-    except IndexError:
-        raise FailedToTerminate("SC_oracle_acc_mcs")
+        try:
+            return x[1:][np.argmax(np.array(metric)[1:] >= self.threshold) + 1]
+        except IndexError:
+            raise FailedToTerminate("SC_oracle_acc_mcs")
 
 
-def SC_mes(x, expected_error_min, threshold=1e-2, **kwargs):
+@dataclass
+class SC_mes(Criteria):
     """
     Determine a stopping point based on the expected error of the classifier is below a
     threshold.
 
     https://www.aclweb.org/anthology/I08-1048.pdf
     """
-    if (expected_error_min <= threshold).any():
-        return x.iloc[np.argmax(expected_error_min <= threshold)]
 
-    raise FailedToTerminate("SC_mes")
+    threshold: int = 1e-2
+
+    def metric(self, expected_error_min, **kwargs):
+        return expected_error_min
+
+    def condition(self, x, metric):
+        if (metric <= self.threshold).any():
+            return x.iloc[np.argmax(metric <= self.threshold)]
+
+        raise FailedToTerminate("SC_mes")
 
 
-def EVM(
-    x,
-    uncertainty_variance,
-    uncertainty_variance_selected,
-    selected=True,
-    n=2,
-    m=1e-3,
-    **kwargs,
-):
+class EVM(Criteria):
     """
     Determine a stopping point based on the variance of the uncertainty in the unlabelled pool.
 
@@ -151,85 +188,35 @@ def EVM(
     used `0.5`.
 
     https://www.aclweb.org/anthology/W10-0101.pdf
-
     """
-    variance = uncertainty_variance_selected if selected else uncertainty_variance
-    current = 0
-    last = variance[0]
-    for i, value in enumerate(variance[1:]):
-        if current == 2:
-            # This used to be -1, which was a bug I think?
-            return x[i + 1]
-        if value < last - m:
-            current += 1
-        last = value
-    raise FailedToTerminate("EVM")
+
+    selected: bool = True
+    n: int = 2
+    m: float = 1e-3
 
 
-def VM(
-    x,
-    uncertainty_variance,
-    uncertainty_variance_selected,
-    selected=True,
-    n=2,
-    m=1e-3,
-    **kwargs,
-):
-    """
-    Determine a stopping point based on the variance of the uncertainty in the unlabelled pool.
+    def metric(self, uncertainty_variance, uncertainty_variance_selected, **kwargs):
+        return uncertainty_variance_selected if self.selected else uncertainty_variance
 
-    * `selected` determines if the variance is calculated accross the entire pool or only the instances
-    to be selected.
-
-    * `n` the number of values for which the variance must decrease sequentially, paper used `2`.
-
-    https://www.aclweb.org/anthology/W10-0101.pdf
-    """
-    return EVM(
-        x,
-        uncertainty_variance,
-        uncertainty_variance_selected,
-        selected=selected,
-        n=n,
-        m=0,
-    )
+    def condition(self, x, metric):
+        current = 0
+        last = metric[0]
+        for i, value in enumerate(metric[1:]):
+            if current == self.n:
+                # This used to be -1, which was a bug I think?
+                return x[i + 1]
+            if value < last - self.m:
+                current += 1
+            last = value
+        raise FailedToTerminate("EVM")
 
 
-def SSNCut(
-    x, classifiers, X_unlabelled, Y_oracle, pre=None, m=0.2, affinity="linear", **kwargs
-):
-    if len(np.unique(classifiers[0].y_training)) > 2:
-        raise InvalidAssumption("SSNCut", "dataset was not binary")
-    values = (
-        pre
-        if pre is not None
-        else SSNCut_values(
-            classifiers, X_unlabelled, Y_oracle, m=0.2, affinity="linear"
-        )
-    )
-
-    smallest = np.infty
-    x0 = 0
-    for i, v in enumerate(values):
-        if v < smallest:
-            smallest = v
-            x0 = 0
-        else:
-            x0 += 1
-        if x0 == 10:
-            return x.iloc[i - 10]  # return to the point of lowest value
-
-    raise FailedToTerminate("SSNCut")
+class VM(EVM):
+    m: float = 0
 
 
-def SSNCut_values(
-    classifiers,
-    X_unlabelled,
-    Y_oracle,
-    m=0.2,
-    dense_atol=1e-6,
-    **kwargs,
-):
+@dataclass
+class SSNCut(Criteria):
     """
     NOTES:
     * They used an RBF svm to match the RBF affinity measure for SpectralClustering
@@ -239,85 +226,90 @@ def SSNCut_values(
     file:///F:/Documents/Zotero/storage/DJGRDXSK/Fu%20and%20Yang%20-%202015%20-%20Low%20density%20separation%20as%20a%20stopping%20criterion%20for.pdf
     """
 
-    if all(getattr(clf.estimator, "kernel", None) != "linear" for clf in classifiers):
-        raise InvalidAssumption("SSNCut", "model is not a linear SVM")
+    m: float = 0.2
 
-    unique_y = np.unique(classifiers[0].y_training)
-    if len(unique_y) > 2:
-        print("WARNING: SSNCut is not designed for non-binary classification")
+    def metric(
+        self,
+        classifiers,
+        **kwargs,
+    ):
 
-    clustering = SpectralClustering(n_clusters=unique_y.shape[0], affinity='precomputed')
+        if all(getattr(clf.estimator, "kernel", None) != "linear" for clf in classifiers):
+            raise InvalidAssumption("SSNCut", "model is not a linear SVM")
 
-    out = []
+        unique_y = np.unique(classifiers[0].y_training)
+        if len(unique_y) > 2:
+            raise InvalidAssumption("SSNCut", "dataset is not binary")
 
-    X_unlabelleds = reconstruct_unlabelled(
-        classifiers, X_unlabelled, Y_oracle, dense_atol=dense_atol
-    )
+        clustering = SpectralClustering(n_clusters=unique_y.shape[0], affinity='precomputed')
 
-    for i, (clf, X_unlabelled) in enumerate(zip(classifiers, X_unlabelleds)):
-        # Note: With non-binary classification the value of the decision function is a transformation of the distance...
-        order = np.argsort(np.abs(clf.estimator.decision_function(X_unlabelled)))
-        M = X_unlabelled[order[: min(1000, int(m * X_unlabelled.shape[0]))]]
+        out = []
 
-        y0 = clf.predict(M)
+        for i, clf in enumerate(classifiers):
+            # Note: With non-binary classification the value of the decision function is a transformation of the distance...
+            order = np.argsort(np.abs(clf.estimator.decision_function(clf.X_unlabelled)))
+            M = clf.X_unlabelled[order[: min(1000, int(self.m * clf.X_unlabelled.shape[0]))]]
 
-        # We use cos+1 as our affinity matrix as we want something that:
-        # * Is linear, to fit the rbf svm/rbf affinity pattern in the paper
-        # * Handles non-normalized samples (rules out linear)
-        # * Is non-negative (condition of scikit-learn's implementation)
-        affinity = pairwise_kernels(M, metric="cosine")+1
-        assert np.all(affinity >= 0)
-        y1 = clustering.fit_predict(affinity)
+            y0 = clf.predict(M)
 
-        y0 = LabelEncoder().fit_transform(y0)
-        diff = np.sum(y0 == y1) / X_unlabelled.shape[0]
-        if diff > 0.5:
-            diff = 1 - diff
-        out.append(diff)
+            # We use cos+1 as our affinity matrix as we want something that:
+            # * Is linear, to fit the rbf svm/rbf affinity pattern in the paper
+            # * Handles non-normalized samples (rules out linear)
+            # * Is non-negative (condition of scikit-learn's implementation)
+            affinity = pairwise_kernels(M, metric="cosine")+1
+            assert np.all(affinity >= 0)
+            y1 = clustering.fit_predict(affinity)
 
-    return out
+            y0 = LabelEncoder().fit_transform(y0)
+            diff = np.sum(y0 == y1) / clf.X_unlabelled.shape[0]
+            if diff > 0.5:
+                diff = 1 - diff
+            out.append(diff)
+
+        return out
+
+    def condition(self, x, metric):
+        smallest = np.infty
+        x0 = 0
+        for i, v in enumerate(metric):
+            if v < smallest:
+                smallest = v
+                x0 = 0
+            else:
+                x0 += 1
+            if x0 == 10:
+                return x.iloc[i - 10]  # return to the point of lowest value
+
+        raise FailedToTerminate("SSNCut")
 
 
-def fscore_tvdiff(x, classifiers, X_unlabelled, Y_oracle):
-    """
-    'Performance convergence' using TVDiff gradient estimation
-    https://www.aclweb.org/anthology/C08-1059
-    """
-    values = list(fscore(classifiers, X_unlabelled, Y_oracle))
-    grad = no_ahead_tvregdiff(values, 1, 1e-1, plotflag=False, diagflag=False)
-    return x.iloc[2 + np.argmax(grad[2:] < 0)]
-
-
-def contradictory_information(x, contradictory_information, rounds=3, **kwargs):
+@dataclass
+class ContradictoryInformation(Criteria):
     """
     Stop when contradictory information drops for `rounds` consecutive rounds.
 
     https://www-sciencedirect-com.ezproxy.auckland.ac.nz/science/article/pii/S088523080700068X
     """
 
-    current = 0
-    last = contradictory_information[0]
-    for i, value in enumerate(contradictory_information[1:]):
-        if current == rounds:
-            return x[i + 1]
-        if value < last:
-            current += 1
-        last = value
-    raise FailedToTerminate("contradictory_information")
+    rounds: int = 3
+
+    def metric(self, contradictory_information, **kwargs):
+        return contradictory_information
+
+    def condition(self, x, metric):
+        current = 0
+        last = metric[0]
+        for i, value in enumerate(metric[1:]):
+            if current == self.rounds:
+                return x[i + 1]
+            if value < last:
+                current += 1
+            last = value
+        raise FailedToTerminate("contradictory_information")
 
 
-def performance_convergence(
-    x,
-    classifiers,
-    X_unlabelled,
-    Y_oracle,
-    pre=None,
-    threshold=5e-5,
-    k=10,
-    average=np.mean,
-    dense_atol=1e-6,
-    **kwargs,
-):
+@dataclass
+class PerformanceConvergence(Criteria):
     """
     We use k=10 instead of 100 because batch size is 10 for us, 1 for them
     multiple thresholds tested by authors (1e-2, 5e-5)
@@ -325,35 +317,49 @@ def performance_convergence(
     https://www.aclweb.org/anthology/C08-1059.pdf
     """
 
-    perf = (
-        pre
-        if pre is not None
-        else list(fscore(classifiers, X_unlabelled, Y_oracle, dense_atol=dense_atol))
-    )
-    windows = np.lib.stride_tricks.sliding_window_view(perf, k)
-    for i in range(1, len(windows)):
-        w2 = average(windows[i])
-        w1 = average(windows[i - 1])
-        g = w2 - w1
-        if windows[i][-1] > np.max(perf[: i + k]) and g > 0 and g < threshold:
-            return x.iloc[i + k]
+    k: int = 10
+    threshold: float = 5e-5
+    average: Callable = np.mean
 
-    raise FailedToTerminate("performance_convergence")
+    def metric(self, classifiers, **kwargs):
+        for clf in classifiers:
+            X_subsampled = clf.X_unlabelled[
+                np.random.choice(
+                    clf.X_unlabelled.shape[0], min(clf.X_unlabelled.shape[0], 1000), replace=False
+                )
+            ]
+
+            p = clf.predict_proba(X_subsampled)
+            # d indicates if a particular prediction is from the winning (max probability) class
+            d = (p.T == np.max(p, axis=1)).T * 1
+
+            def tp(p, d):
+                "Sum of the probabilities of the winning predictions"
+                return np.sum(p * d)
+
+            def fp(p, d):
+                "Sum of (1-prob) for the winning prediction"
+                return np.sum((1 - p) * d)
+
+            def fn(p, d):
+                return np.sum(p * (1 - d))
+
+            yield 2 * tp(p, d) / (2 * tp(p, d) + fp(p, d) + fn(p, d))
+
+    def condition(self, x, metric):
+        windows = np.lib.stride_tricks.sliding_window_view(metric, self.k)
+        for i in range(1, len(windows)):
+            w2 = self.average(windows[i])
+            w1 = self.average(windows[i - 1])
+            g = w2 - w1
+            if windows[i][-1] > np.max(metric[: i + self.k]) and g > 0 and g < self.threshold:
+                return x.iloc[i + self.k]
+
+        raise FailedToTerminate("performance_convergence")
 
 
-def uncertainty_convergence(
-    x,
-    classifiers,
-    X_unlabelled,
-    Y_oracle,
-    pre=None,
-    metric=classifier_entropy,
-    aggregator=np.min,
-    threshold=5e-5,
-    k=10,
-    average=np.median,
-    **kwargs,
-):
+@dataclass
+class UncertaintyConvergence(Criteria):
     """
     Stop based on the gradient of the last selected instance. The last selected instance supposedly has maximum uncertainty
     and is hence the most informative.
@@ -372,106 +378,67 @@ def uncertainty_convergence(
     https://www.aclweb.org/anthology/C08-1059.pdf
     """
 
-    uncertainty = pre if pre is not None else metric_selected(classifiers, metric)
-    windows = np.lib.stride_tricks.sliding_window_view(uncertainty, k)
-    for i in range(1, len(windows)):
-        w2 = average(windows[i])
-        w1 = average(windows[i - 1])
-        g = w2 - w1
-        if windows[i][-1] > np.max(uncertainty[: i + k]) and g > 0 and g < threshold:
-            return x.iloc[i + k]
+    metric: Callable = classifier_entropy,
+    aggregator: Callable = np.min,
+    threshold: float = 5e-5,
+    k: int = 10,
+    average: Callable = np.median,
 
-    raise FailedToTerminate("performance_convergence")
+    def metric(self, classifiers, **kwargs):
+        return metric_selected(classifiers, self.metric)
+
+    def condition(self, x, metric):
+        windows = np.lib.stride_tricks.sliding_window_view(metric, self.k)
+        for i in range(1, len(windows)):
+            w2 = self.average(windows[i])
+            w1 = self.average(windows[i - 1])
+            g = w2 - w1
+            if windows[i][-1] > np.max(metric[: i + self.k]) and g > 0 and g < self.threshold:
+                return x.iloc[i + self.k]
+
+        raise FailedToTerminate("performance_convergence")
 
 
-def overall_uncertainty(x, uncertainty_average, **kwargs):
+class OverallUncertainty(Criteria):
     """
     Stop if the overall uncertainty on the unlabelled pool is less than a threshold.
 
     https://www.aclweb.org/anthology/C08-1142.pdf
     """
-    if not (uncertainty_average < 1e-2).any():
-        raise FailedToTerminate("overall_uncertainty")
-    return x.iloc[np.argmax(uncertainty_average < 1e-2)]
+
+    def metric(self, uncertainty_average, **kwargs):
+        return uncertainty_average
+
+    def condition(self, x, metric):
+        if not (metric < 1e-2).any():
+            raise FailedToTerminate("overall_uncertainty")
+        return x.iloc[np.argmax(metric < 1e-2)]
 
 
-def classification_change(
-    x, classifiers, X_unlabelled, Y_oracle, pre=None, dense_atol=1e-6, **kwargs
-):
+class ClassificationChange(Criteria):
     """
     Stop if the predictions on the unlabelled pool does not change between two rounds.
 
     https://www.aclweb.org/anthology/C08-1142.pdf
     """
 
-    values = (
-        pre
-        if pre is not None
-        else classification_change_values(
-            classifiers, X_unlabelled, Y_oracle, dense_atol=dense_atol
-        )
-    )
+    @listify
+    def metric(self, classifiers, **kwargs):
+        yield np.nan
 
-    if not any(x == 1 for x in values):
-        raise FailedToTerminate("classification_change")
+        for i in range(1, len(classifiers)):
+            # print(f"At iteration {i} unlabelled pool has shape {X_unlabelled.shape if X_unlabelled is not None else 'None'}")
+            yield np.count_nonzero(
+                classifiers[i - 1].predict(classifiers[i].X_unlabelled)
+                == classifiers[i].predict(classifiers[i].X_unlabelled)
+            ) / classifiers[i].X_unlabelled.shape[0]
 
-    print(np.argmax(values == 1))
-    return x.iloc[np.argmax(values == 1)]
+    def condition(self, x, metric):
+        if not any(x == 1 for x in metric):
+            raise FailedToTerminate("classification_change")
 
-
-@listify
-def classification_change_values(
-    classifiers, X_unlabelled, Y_oracle, dense_atol=1e-6, **kwargs
-):
-    X_unlabelleds = reconstruct_unlabelled(
-        classifiers, X_unlabelled, Y_oracle, dense_atol=dense_atol
-    )
-
-    # Skip the first pool
-    next(X_unlabelleds)
-
-    yield np.nan
-
-    for i, X_unlabelled in zip(range(1, len(classifiers)), X_unlabelleds):
-        # print(f"At iteration {i} unlabelled pool has shape {X_unlabelled.shape if X_unlabelled is not None else 'None'}")
-        yield np.count_nonzero(
-            classifiers[i - 1].predict(X_unlabelled)
-            == classifiers[i].predict(X_unlabelled)
-        ) / X_unlabelled.shape[0]
-
-
-def fscore(classifiers, X_unlabelled, Y_oracle, dense_atol=1e-6, **kwargs):
-    """
-    https://www.aclweb.org/anthology/C08-1059
-    """
-    X_unlabelleds = reconstruct_unlabelled(
-        classifiers, X_unlabelled, Y_oracle, dense_atol=dense_atol
-    )
-
-    for clf, X_unlabelled in zip(classifiers, X_unlabelleds):
-
-        X_subsampled = X_unlabelled[
-            np.random.choice(
-                X_unlabelled.shape[0], min(X_unlabelled.shape[0], 1000), replace=False
-            )
-        ]
-
-        p = clf.predict_proba(X_subsampled)
-        # d indicates if a particular prediction is from the winning (max probability) class
-        d = (p.T == np.max(p, axis=1)).T * 1
-
-        def tp(p, d):
-            "Sum of the probabilities of the winning predictions"
-            return np.sum(p * d)
-
-        def fp(p, d):
-            "Sum of (1-prob) for the winning prediction"
-            return np.sum((1 - p) * d)
-
-        def fn(p, d):
-            return np.sum(p * (1 - d))
-
-        yield 2 * tp(p, d) / (2 * tp(p, d) + fp(p, d) + fn(p, d))
+        print(np.argmax(metric == 1))
+        return x.iloc[np.argmax(metric == 1)]
 
 
 def reconstruct_unlabelled(clfs, X_unlabelled, Y_oracle, dense_atol=1e-6):
@@ -580,24 +547,26 @@ def reconstruct_unlabelled(clfs, X_unlabelled, Y_oracle, dense_atol=1e-6):
         yield X_unlabelled.copy()
 
 
-def n_support(x, classifiers, n_support, **kwargs):
+class NSupport(Criteria):
     """
     Determine a stopping point based on when the number of support vectors saturates.
 
     https://citeseerx.ist.psu.edu/viewdoc/download?doi=10.1.1.31.6090&rep=rep1&type=pdf
     """
-    if all(getattr(clf.estimator, "kernel", None) != "linear" for clf in classifiers):
-        print("WARN: n_support only supports linear SVMs")
-        return x.iloc[-1]
 
-    kwargs.setdefault("threshold", 0)
-    kwargs.setdefault("stable_iters", 2)
-    return x.iloc[__is_approx_constant(n_support, **kwargs)]
+    threshold: float = 0
+    stable_iters: int = 2
+
+    def metric(self, classifiers, n_support, **kwargs):
+        if all(getattr(clf.estimator, "kernel", None) != "linear" for clf in classifiers):
+            raise InvalidAssumption("n_support only supports linear SVMs")
+        return n_support
+
+    def condition(self, x, metric):
+        return x.iloc[__is_approx_constant(metric, threshold=self.threshold, stable_iters=self.stable_iters)]
 
 
-def stabilizing_predictions(
-    x, classifiers, X_unlabelled, k=3, threshold=0.99, **kwargs
-):
+class StabilizingPredictions(Criteria):
     """
     Determine a stopping point based on agreement between past classifiers on a stopping
     set.
@@ -610,10 +579,18 @@ def stabilizing_predictions(
 
     https://arxiv.org/pdf/1409.5165.pdf
     """
-    metric = kappa_metric(x, classifiers, X_unlabelled, k=k)
-    if not (metric >= threshold).any():
-        raise FailedToTerminate("stabilizing_predictions")
-    return x[np.argmax(metric >= threshold)]
+
+    threshold: float = 0.99
+    k: int = 3
+
+    def metric(self, x, classifiers, **kwargs):
+        return kappa_metric(x, classifiers, k=self.k)
+
+    def condition(self, x, metric):
+        if not (metric >= self.threshold).any():
+            raise FailedToTerminate("stabilizing_predictions")
+        return x[np.argmax(metric >= self.threshold)]
+
 
 
 def KD(x, classifiers, **kwargs):
@@ -643,7 +620,7 @@ def metric_selected(classifiers, metric, aggregator=np.min, **kwargs):
     yield np.nan
 
 
-def max_confidence(x, classifiers, pre=None, threshold=0.001, **kwargs):
+class MaxConfidence(Criteria):
     """
     This strategy is based on uncertainty measurement, considering whether the entropy of each selected unlabelled
     example is less than a very small predefined threshold close to zero, such as 0.001.
@@ -653,55 +630,63 @@ def max_confidence(x, classifiers, pre=None, threshold=0.001, **kwargs):
     https://www.aclweb.org/anthology/D07-1082.pdf
     """
 
-    metric = np.array(
-        pre if pre is not None else metric_selected(classifiers, classifier_entropy)
-    )
-    if not (metric < threshold).any():
-        raise FailedToTerminate("max_confidence")
+    threshold: float = 0.001
 
-    return x[np.argmax(metric < threshold)]
+    def metric(self, classifiers, **kwargs):
+        return np.array(metric_selected(classifiers, classifier_entropy))
 
 
-def uncertainty_min(x, uncertainty_min, **kwargs):
-    """
-    Stop if the minimum uncertainty in the unlabelled pool is less than a threshold.
-    """
-    kwargs.setdefault("stable_iters", 3)
-    kwargs.setdefault("maximum", 1e-1)
-    return x.iloc[__is_within_bound(uncertainty_min, **kwargs)]
+    def condition(self, x, metric):
+        if not (metric < self.threshold).any():
+            raise FailedToTerminate("max_confidence")
+
+        return x[np.argmax(metric < self.threshold)]
 
 
-def ZPS(classifiers, order=1, safety_factor=1.0, **kwargs):
+class GOAL(Criteria):
     """
     Determine a stopping point based on the accuracy of previously trained classifiers.
     """
-    assert safety_factor >= 1.0, "safety factor cannot be less than 1"
-    accx, _acc = first_acc(classifiers)
-    grad = np.array(no_ahead_tvregdiff(_acc, 1, 1e-1, plotflag=False, diagflag=False))
-    start = np.argmax(grad < 0)
 
-    if order == 2:
-        second = np.array(
-            [
-                np.nan,
-                np.nan,
-                *no_ahead_tvregdiff(grad[2:], 1, 1e-1, plotflag=False, diagflag=False),
-            ]
-        )
-        try:
-            return accx[
-                int(
-                    (np.argmax((grad[start:] >= 0) & (second[start:] >= 0)) + start)
-                    * safety_factor
-                )
-            ]
-        except IndexError:
-            raise FailedToTerminate("ZPS")
+    safety_factor: float = 1.0
+    order: int = 2
 
-    try:
-        return accx[int((np.argmax(grad[start:] >= 0) + start) * safety_factor)]
-    except IndexError:
-        raise FailedToTerminate("ZPS")
+
+    def metric(self, classifiers, **kwargs):
+        assert self.safety_factor >= 1.0, "safety factor cannot be less than 1"
+        accx, _acc = first_acc(classifiers)
+        grad = np.array(no_ahead_tvregdiff(_acc, 1, 1e-1, plotflag=False, diagflag=False))
+        start = np.argmax(grad < 0)
+
+        if self.order == 2:
+            second = np.array(
+                [
+                    np.nan,
+                    np.nan,
+                    *no_ahead_tvregdiff(grad[2:], 1, 1e-1, plotflag=False, diagflag=False),
+                ]
+            )
+
+        return (grad, start, second, accx)
+
+    def condition(self, x, metric):
+        # This is hacky, not sure if there's a better way...
+        grad, start, second, accx = metric
+        if self.order == 2:
+            try:
+                return accx[
+                    int(
+                        (np.argmax((grad[start:] >= 0) & (second[start:] >= 0)) + start)
+                        * self.safety_factor
+                    )
+                ]
+            except IndexError:
+                raise FailedToTerminate("ZPS")
+        else:
+            try:
+                return accx[int((np.argmax(grad[start:] >= 0) + start) * self.safety_factor)]
+            except IndexError:
+                raise FailedToTerminate("ZPS")
 
 
 # ----------------------------------------------------------------------------------------------
@@ -815,68 +800,12 @@ def first_acc(classifiers, metric=metrics.accuracy_score, **kwargs):
     return x, diffs
 
 
-# Maybe viable but completely wrong
-def kappa_metric_but_not_and_broken(x, classifiers, X_unlabelled, k=3, **kwargs):
-    from sklearn.preprocessing import OneHotEncoder
 
-    out = [np.nan, np.nan]
-    classes = np.unique(classifiers[0].y_training)
-    enc = LabelEncoder()
-    enc.fit(classifiers[0].y_training)
-
-    predictions = np.array(
-        [enc.transform(clf.predict(X_unlabelled)) for clf in classifiers]
-    )
-    probabilities = []
-    for preds in predictions:
-        probabilities.append([])
-        values = np.unique(preds, return_counts=True)
-        for klass in enc.transform(classes):
-            v = values[1][values[0] == klass]
-            v = v[0] if v.shape[0] > 0 else 0
-            probabilities[-1].append(v / X_unlabelled.shape[0])
-        # for klass in enc.transform(classes):
-        #    probabilities[-1].append(np.count_nonzero(preds==klass)/X_unlabelled.shape[0])
-    probabilities = np.array(probabilities)
-    print(probabilities)
-    for i in range(2, len(classifiers)):
-        k1 = np.sum(probabilities[i] * probabilities[i - 1])
-        k2 = np.sum(probabilities[i] * probabilities[i - 2])
-        k3 = np.sum(probabilities[i - 1] * probabilities[i - 2])
-        assert k1 != np.nan and k2 != np.nan and k3 != np.nan
-        kappa = np.mean([k1, k2, k3])
-
-        out.append(kappa)
-
-    return np.array(out)
-
-
-def kappa_metric_first(x, classifiers, X_unlabelled, **kwargs):
-    from sklearn.preprocessing import OneHotEncoder
-
-    out = [np.nan]
-    classes = np.unique(classifiers[0].y_training)
-
-    X_subsampled = X_unlabelled[
-        np.random.choice(X_unlabelled.shape[0], 1000, replace=False)
-    ]
-
-    predictions = np.array([clf.predict(X_subsampled) for clf in classifiers])
-
-    for i in range(1, len(classifiers)):
-        # Compute kappa against the first trained classifier
-        kappa = cohen_kappa_score(predictions[0], predictions[i])
-
-        out.append(kappa)
-
-    return np.array(out)
-
-
-def kappa_metric(x, classifiers, X_unlabelled, k=3, **kwargs):
+def kappa_metric(x, classifiers, k=3, **kwargs):
     from sklearn.preprocessing import OneHotEncoder
 
     out = [np.nan] * (k - 1)
-    classes = np.unique(classifiers[0].y_training)
+    X_unlabelled = classifiers[0].X_unlabelled
 
     # Authors used 2000, but probably better to go with our standard 1000
     X_subsampled = X_unlabelled[
@@ -898,41 +827,6 @@ def kappa_metric(x, classifiers, X_unlabelled, k=3, **kwargs):
     return np.array(out)
 
 
-def hyperplane_similarity(classifiers, nth="last"):
-    """
-    Returns shape (len(classifiers), (n_classes*(n_classes-1)//2))
-    """
-    from numpy.linalg import norm
-
-    n_classes = classifiers[0].estimator.n_support_.shape[0]
-    out = [np.full((n_classes * (n_classes - 1) // 2,), np.nan)]
-    for i, clf in enumerate(classifiers[1:]):
-        clf = clf.estimator
-        pclf = classifiers[i if nth == "last" else 0].estimator
-
-        #
-        # 0 is perfectly similar
-        out.append(
-            [
-                1
-                - np.abs(np.inner(clf.coef_[i], pclf.coef_[i]))
-                / (norm(clf.coef_[i]) * norm(clf.coef_[i]))
-                + np.abs(clf.intercept_[i] - pclf.intercept_[i])
-                / np.sqrt(np.abs(clf.intercept_[i] * pclf.intercept_[i]))
-                for i in range(clf.coef_.shape[0])
-            ]
-        )
-    return np.array(out)
-
-
-def no_ahead_grad(x):
-    """
-    Compute a gradient across x, ensuring that no values ahead of the current are used for the
-    gradient calculation.
-    """
-    return [np.inf, np.inf, *[np.gradient(x[:i])[-1] for i in range(2, len(x))]]
-
-
 def no_ahead_tvregdiff(value, *args, **kwargs):
     out = [np.nan, np.nan]
     for i in range(2, len(value)):
@@ -943,22 +837,6 @@ def no_ahead_tvregdiff(value, *args, **kwargs):
 # ----------------------------------------------------------------------------------------------
 # Metric evaluators
 # ----------------------------------------------------------------------------------------------
-
-
-def __is_within_bound(values, minimum=None, maximum=None, stable_iters=3, **kwargs):
-    n = 0
-    for i, value in enumerate(values):
-        if n == stable_iters:
-            # TODO: Should this be i+1, i-1?
-            return i
-        if (minimum is None or value >= minimum) and (
-            maximum is None or value <= maximum
-        ):
-            n += 1
-        else:
-            n = 0
-    return -1
-
 
 def __is_approx_constant(values, stable_iters=3, threshold=1e-1, **kwargs):
     """
@@ -978,69 +856,55 @@ def __is_approx_constant(values, stable_iters=3, threshold=1e-1, **kwargs):
             n = 0
     return -1
 
-
-def __is_approx_minimum(value, stable_iters=3, threshold=0, **kwargs):
-    """
-    Determine if the input is approximately at a minimum by estimating the gradient.
-    """
-
-    pass
-
-
 # ----------------------------------------------------------------------------------------------
 # Evaluation
 # ----------------------------------------------------------------------------------------------
 
 
+StopResult = namedtuple('StopResult', ['instances', 'accuracy_score', 'f1_score', 'roc_auc_score', 'metric'])
+
+
 def eval_stopping_conditions(results_plots, classifiers, conditions=None, recompute=[]):
     if conditions is None:
-        params = {"kappa": {"k": 2}}
         conditions = {
-            **{
-                f"{f.__name__}": partial(f, **params.get(f.__name__, {}))
-                for f in [
-                    uncertainty_min,
-                    SC_entropy_mcs,
-                    SC_oracle_acc_mcs,
-                    SC_mes,
-                    EVM,
-                    # ZPS_ee_grad,
-                    stabilizing_predictions,
-                ]
-            },
-            "ZPS2": partial(ZPS, order=2),
-            # "SSNCut": SSNCut
+            f"{f.display_name}": f for f in Criteria.all_criteria()
         }
 
     stop_results = {}
 
-    def eval_cond(name, conf, cond, j, **kwargs):
+    def eval_cond(name: str, conf: Config, condcls: Type, j: int, **kwargs):
+        # Restore saved result if possible
         if (
             name in stop_results[conf.dataset_name]
             and len(stop_results[conf.dataset_name][name]) > j
             and name not in recompute
         ):
-            if isinstance(stop_results[conf.dataset_name][name][j], list) or isinstance(
-                stop_results[conf.dataset_name][name][j], tuple
-            ):
-                return stop_results[conf.dataset_name][name][j][0]
-            else:
-                return stop_results[conf.dataset_name][name][j]
+            print(f"Restoring saved result for {j}th run of {name} on {conf.dataset_name}")
+            return stop_results[conf.dataset_name][name][j][0], stop_results[conf.dataset_name][name][j][4]
+
+        # Instantiate condition class
+        cond = condcls()
+
+        # Attempt to evaluate the metric
         try:
-            # Hack: Swarm needs a more relaxed tolerance for reconstruct_unlabelled
-            if conf.dataset_name == "swarm":
-                kwargs["dense_atol"] = 1e-1
-            else:
-                kwargs["dense_atol"] = 1e-6
-            return cond(**kwargs)
+            metric = cond.metric(**kwargs)
+        except InvalidAssumption:
+            return None, None
+        except Exception as e:
+            print(
+                f"WARNING {name} failed evaluating metric on {conf.dataset_name} run {j} with exception: {e}"
+            )
+            raise e
+
+        # Attempt to evaluate, and return, the stop point & metric
+        try:
+            return cond.condition(metric), metric
         except FailedToTerminate:
             print(f"{name} failed to terminate on {conf.dataset_name} run {j}")
             return None
-        except InvalidAssumption:
-            return None
         except Exception as e:
             print(
-                f"WARNING {name} failed on {conf.dataset_name} run {j} with exception: {e}"
+                f"WARNING {name} failed evaluating metric on {conf.dataset_name} run {j} with exception: {e}"
             )
             raise e
 
@@ -1050,27 +914,6 @@ def eval_stopping_conditions(results_plots, classifiers, conditions=None, recomp
 
         X, y = getattr(libdatasets, conf.dataset_name)(None)
 
-        def pools(X, y, conf, runs):
-            for i in runs:
-                _, X_unlabelled, _, y_oracle, _, _ = active_split(
-                    X,
-                    y,
-                    labeled_size=conf.meta["labelled_size"],
-                    test_size=conf.meta["test_size"],
-                    random_state=check_random_state(i),
-                    ensure_y=conf.meta["ensure_y"],
-                )
-                assert X_unlabelled.shape[0] > 0, "Unlabelled pool cannot have length 0"
-                assert (
-                    y_oracle.shape[0] > 0
-                ), "Unlabelled pool labels cannot have length 0"
-                yield (X_unlabelled, y_oracle)
-
-        it1, it2 = itertools.tee(pools(X, y, conf, conf.runs))
-        unlabelled_pools = map(operator.itemgetter(0), it1)
-        y_oracles = map(operator.itemgetter(1), it2)
-
-        # todo: split this into chunks for memory usage reasons
         results = np.array(
             Parallel(n_jobs=min(os.cpu_count(), len(metrics) * len(conditions)))(
                 delayed(eval_cond)(
@@ -1081,11 +924,9 @@ def eval_stopping_conditions(results_plots, classifiers, conditions=None, recomp
                     **metric,
                     classifiers=clfs_,
                     config=conf,
-                    X_unlabelled=X_unlabelled,
-                    Y_oracle=y_oracle,
                 )
-                for j, (clfs_, metric, X_unlabelled, y_oracle) in enumerate(
-                    zip(clfs, metrics, unlabelled_pools, y_oracles)
+                for j, (clfs_, metric) in enumerate(
+                    zip(clfs, metrics)
                 )
                 for (name, cond) in conditions.items()
             )
@@ -1094,21 +935,22 @@ def eval_stopping_conditions(results_plots, classifiers, conditions=None, recomp
         for i in range(len(conditions)):
             try:
                 stop_results[conf.dataset_name][list(conditions.keys())[i]] = [
-                    (
+                    StopResult(
                         x
-                        if list(conditions.keys())[i] != "SSNCut"
-                        else (x + 10 if x is not None else None),
+                            if list(conditions.keys())[i] != "SSNCut"
+                            else (x + 10 if x is not None else None),
                         metrics[j]["accuracy_score"][metrics[j].x == x].iloc[0]
-                        if x is not None
-                        else None,
+                            if x is not None
+                            else None,
                         metrics[j]["f1_score"][metrics[j].x == x].iloc[0]
-                        if x is not None
-                        else None,
+                            if x is not None
+                            else None,
                         metrics[j]["roc_auc_score"][metrics[j].x == x].iloc[0]
-                        if x is not None
-                        else None,
+                            if x is not None
+                            else None,
+                        metric
                     )
-                    for j, x in enumerate(results[:, i])
+                    for j, (x, metric) in enumerate(results[:, i])
                 ]
             except IndexError as e:
                 print(

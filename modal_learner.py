@@ -108,4 +108,5 @@ class IndexLearner(ActiveLearner):
 
     def __setstate__(self, state):
         # Pools are restored by compressedstore on load.
+        # Or by MyActiveLearner in the case of the active classifier.
         self.__dict__.update(state)
