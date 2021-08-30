@@ -898,7 +898,7 @@ def eval_stopping_conditions(results_plots, classifiers, conditions=None, recomp
 
         # Attempt to evaluate, and return, the stop point & metric
         try:
-            return cond.condition(metric), metric
+            return cond.condition(x=kwargs['x'], metric=metric), metric
         except FailedToTerminate:
             print(f"{name} failed to terminate on {conf.dataset_name} run {j}")
             return None
@@ -964,7 +964,7 @@ def eval_stopping_conditions(results_plots, classifiers, conditions=None, recomp
 
 
 def __read_stopping(config_str):
-    file = f"{out_dir()}/stopping/{config_str}.pickle"
+    file = f"{out_dir()}/stopping2/{config_str}.pickle"
     try:
         with open(file, "rb") as f:
             return dill.load(f)
@@ -973,7 +973,7 @@ def __read_stopping(config_str):
 
 
 def __write_stopping(config_str, data):
-    file = f"{out_dir()}/stopping/{config_str}.pickle"
+    file = f"{out_dir()}/stopping2/{config_str}.pickle"
     with open(file, "wb") as f:
         return dill.dump(data, f)
 
