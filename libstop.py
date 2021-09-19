@@ -48,7 +48,7 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from functools import partial
 import operator
-from typing import Callable, List, Type
+from typing import Callable, Dict, List, Type
 
 import dill
 import numpy as np
@@ -1103,7 +1103,57 @@ def __is_approx_constant(values, stable_iters=3, threshold=1e-1, **kwargs):
 StopResult = namedtuple('StopResult', ['instances', 'accuracy_score', 'f1_score', 'roc_auc_score', 'metric'])
 
 
-def eval_stopping_conditions(results_plots, classifiers, conditions=None, recompute=[], jobs=None, save=True):
+def eval_cond(dataset_results: Dict, name: str, conf: Config, condcls: Type, j: int, recompute: list, memory_profile: bool = False, **kwargs):
+    # Restore saved result if possible
+    if (
+        name in dataset_results
+        and len(dataset_results[name]) > j
+        and name not in recompute
+    ):
+        print(f"Restoring saved result for {j}th run of {name} on {conf.dataset_name}")
+        return dataset_results[name][j][0], dataset_results[name][j][4]
+
+    # Memory profiling
+    if memory_profile:
+        from pympler import asizeof
+        print(asizeof.asized(locals(), detail=3).format())
+            
+    metric_start = time.monotonic()
+
+    # Instantiate condition class
+    cond = condcls()
+
+    # Attempt to evaluate the metric
+    try:
+        metric = cond.metric(**kwargs)
+    except InvalidAssumption:
+        return None, None
+    except Exception as e:
+        print(
+            f"WARNING {name} failed evaluating metric on {conf.dataset_name} run {j} with exception: {e}"
+        )
+        raise e
+        
+    print(f"Evaluating metric {name} on {conf.dataset_name} took:", str(datetime.timedelta(seconds=time.monotonic()-metric_start)))
+    cond_start = time.monotonic()
+
+    # Attempt to evaluate, and return, the stop point & metric
+    try:
+        return cond.condition(x=kwargs['x'], metric=metric), metric
+    except FailedToTerminate:
+        print(f"{name} failed to terminate on {conf.dataset_name} run {j}")
+        return None, metric
+    except Exception as e:
+        print(
+            f"WARNING {name} failed evaluating metric on {conf.dataset_name} run {j} with exception: {e}"
+        )
+        raise e
+    finally:
+        print(f"Evaluating cond {name} on {conf.dataset_name} took:", str(datetime.timedelta(seconds=time.monotonic()-cond_start)))
+        print(f"Evaluating {name} on {conf.dataset_name} took:", str(datetime.timedelta(seconds=time.monotonic()-metric_start)))
+
+
+def eval_stopping_conditions(results_plots, classifiers, conditions=None, recompute=[], jobs=None, save=True, memory_profile=False):
     if conditions is None:
         conditions = {
             f"{f.display_name}": f for f in Criteria.all_criteria()
@@ -1111,49 +1161,9 @@ def eval_stopping_conditions(results_plots, classifiers, conditions=None, recomp
 
     stop_results = {}
 
-    def eval_cond(name: str, conf: Config, condcls: Type, j: int, **kwargs):
-        # Restore saved result if possible
-        if (
-            name in stop_results[conf.dataset_name]
-            and len(stop_results[conf.dataset_name][name]) > j
-            and name not in recompute
-        ):
-            print(f"Restoring saved result for {j}th run of {name} on {conf.dataset_name}")
-            return stop_results[conf.dataset_name][name][j][0], stop_results[conf.dataset_name][name][j][4]
-                
-        metric_start = time.monotonic()
-
-        # Instantiate condition class
-        cond = condcls()
-
-        # Attempt to evaluate the metric
-        try:
-            metric = cond.metric(**kwargs)
-        except InvalidAssumption:
-            return None, None
-        except Exception as e:
-            print(
-                f"WARNING {name} failed evaluating metric on {conf.dataset_name} run {j} with exception: {e}"
-            )
-            raise e
-            
-        print(f"Evaluating metric {name} on {conf.dataset_name} took:", str(datetime.timedelta(seconds=time.monotonic()-metric_start)))
-        cond_start = time.monotonic()
-
-        # Attempt to evaluate, and return, the stop point & metric
-        try:
-            return cond.condition(x=kwargs['x'], metric=metric), metric
-        except FailedToTerminate:
-            print(f"{name} failed to terminate on {conf.dataset_name} run {j}")
-            return None, metric
-        except Exception as e:
-            print(
-                f"WARNING {name} failed evaluating metric on {conf.dataset_name} run {j} with exception: {e}"
-            )
-            raise e
-        finally:
-            print(f"Evaluating cond {name} on {conf.dataset_name} took:", str(datetime.timedelta(seconds=time.monotonic()-cond_start)))
-            print(f"Evaluating {name} on {conf.dataset_name} took:", str(datetime.timedelta(seconds=time.monotonic()-metric_start)))
+    if memory_profile:
+        from pympler import asizeof
+        print(asizeof.asized(locals(), detail=3).format())
 
     for (clfs, (conf, metrics)) in zip(classifiers, results_plots):
         print(f"Starting {conf.model_name} {conf.dataset_name}")
@@ -1163,6 +1173,7 @@ def eval_stopping_conditions(results_plots, classifiers, conditions=None, recomp
         results = np.array(
             Parallel(n_jobs=jobs)(
                 delayed(eval_cond)(
+                    stop_results[conf.dataset_name],
                     name,
                     conf,
                     cond,
@@ -1170,6 +1181,7 @@ def eval_stopping_conditions(results_plots, classifiers, conditions=None, recomp
                     **metric,
                     classifiers=clfs_,
                     config=conf,
+                    memory_profile=memory_profile
                 )
                 for j, (clfs_, metric) in enumerate(
                     zip(clfs, metrics)
