@@ -1,11 +1,36 @@
 from itertools import groupby
 
+import scipy
 import matplotlib.pyplot as plt
 from matplotlib.path import Path
 from matplotlib.patches import Arrow
 import matplotlib.patches as patches
+from sklearn.decomposition import PCA
 
 import numpy as np
+
+
+DEFAULT_COLORMAP = {
+    'Overall Uncertainty': '#e6194B',
+    'FirstDiffZeroPerformanceConvergence': '#3cb44b',
+    'Performance Convergence': '#ffe119',
+    'Max Confidence': '#4363d8',
+    'VM': '#f58231',
+    'SecondDiffZeroPerformanceConvergence': '#911eb4',
+    'FirstDiffZeroStabilizingPredictions-alpha1': '#42d4f4',
+    'SC_entropy_mcs': '#f032e6',
+    'FirstDiffMinOverallUncertainty': '#bfef45',
+    'GOAL': '#fabed4',
+    'SC_oracle_acc': '#469990',
+    'SecondDiffZeroOverallUncertainty': '#dcbeff',
+    'EVM': '#9A6324',
+    'SSNCut': '#fffac8',
+    'Stabilizing Predictions': '#800000',
+    'Uncertainty Convergence': '#aaffc3',
+    'FirstDiffZeroOverallUncertainty': '#808000',
+    'Classification Change': '#ffd8b1',
+    'Contradictory Information': '#000075'
+}
 
 
 def make_meshgrid(x, y, h=0.02):
@@ -264,60 +289,97 @@ def _get_frontier(res):
     return frontier.astype(int)
 
 
-def plot_paraeto_hull(results):
-    datasets = list(results.keys())
-    criteria = list(results[datasets[0]].keys())
-    katmap = sns.color_palette("gist_ncar", 18)
-    markers = [
-        "s",
-        "v",
-        "^",
-        "*",
-        "D",
-        "P",
-        "o",
-        "<",
-        ">",
-        "x",
-        "s",
-        "v",
-        "^",
-        "*",
-        "D",
-        "P",
-        "o",
-        "<",
-        ">",
-        "x",
-    ]
+def pca_error_points(X: np.array, clamp=None, debug:bool = False) -> np.array:
+    """
+    Given a 2d dataset returns four points representing two lines found from error bars in a PCA decomposition.
+    0: x_low, 1: x_high, 2: y_low, 3: y_high
+    """
+    # Initialize PCA
+    pca = PCA(n_components=2, whiten=True, random_state=0)
+    # Remove NaN points
+    non_nan = X[~np.any(np.isnan(X), axis=1)]
+    # Fit PCA
+    pca.fit(non_nan)
+    # Transform points into PCA
+    X_t = pca.transform(non_nan)
+    # Calculate error bars in PCA coordinates
+    x_err_pca = [np.percentile(X_t[0:,], 2.5), np.percentile(X_t[0:,], 97.5)]
+    y_err_pca = [np.percentile(X_t[1:,], 2.5), np.percentile(X_t[1:,], 97.5)]
+    # X Error
+    x_l = [np.mean(X_t[0:,])+x_err_pca[0], np.mean(X_t[1:,])]
+    x_h = [np.mean(X_t[0:,])+x_err_pca[1], np.mean(X_t[1:,])]
+    # Y Error
+    y_l = [np.mean(X_t[0:,]), np.mean(X_t[1:,])+y_err_pca[0]]
+    y_h = [np.mean(X_t[0:,]), np.mean(X_t[1:,])+y_err_pca[1]]
+    
+    x_l_t, x_h_t, y_l_t, y_h_t = pca.inverse_transform([x_l, x_h, y_l, y_h])
+    
+    if debug:
+        print("pca", x_l, x_h, y_l, y_h)
+        print("err_pca", x_err_pca, y_err_pca)
+        print("tra", x_l_t, x_h_t, y_l_t, y_h_t)
+        
+    if clamp:
+        x_l_t[0], x_h_t[0], y_l_t[0], y_h_t[0] = np.clip([x_l_t[0], x_h_t[0], y_l_t[0], y_h_t[0]], *clamp[0])
+        x_l_t[1], x_h_t[1], y_l_t[1], y_h_t[1] = np.clip([x_l_t[1], x_h_t[1], y_l_t[1], y_h_t[1]], *clamp[1])
+    
+    return x_l_t, x_h_t, y_l_t, y_h_t
 
-    fig, ax = plt.subplots(3, 3, figsize=(15, 15))
+
+def plot_paraeto_hull(
+    results, 
+    ylims=None, 
+    hull_alpha=0.3, 
+    rows=3, 
+    cols=3, 
+    figsize=(15,15), 
+    dpi=300, 
+    hull=True, 
+    error='percentile',
+    colors=None,
+    marker_size=30
+):
+    datasets = list(results.keys())
+    criteria = list({x for r in results.values() for x in r.keys()})
+    if colors is None:
+        colors = DEFAULT_COLORMAP
+    #katmap = sns.color_palette("gist_ncar", 19)
+    markers = ["s","v","^","*","D","P","o","<",">","x","s","v","^","*","D","P","o","<",">","x", "s","v","^","*","D","P","o","<",">","x","s","v","^","*","D","P","o","<",">","x"]
+
+    fig, ax = plt.subplots(rows, cols, figsize=figsize, dpi=dpi)
     for ds in range(len(datasets)):
-        r = int(ds) // 3  # div
-        c = int(ds) % 3  # mod
+        r = int(ds) // cols  # div
+        c = int(ds) % cols  # mod
 
         res_name = results[datasets[ds]]
         res_name_f = np.empty((0, 2))
         sc_name = np.empty(0).astype("int")
 
         for sc, res in res_name.items():
-            # res_anu_avg = np.row_stack((res_anu_avg, np.nanmean(np.array(res, dtype=np.float), axis=0)[0:2]))
-            res_name_f = np.concatenate(
-                (res_name_f, np.array(res, dtype=np.float)[:, 0:2])
-            )
+            res_name_f = np.array(np.concatenate(
+                (res_name_f, np.array(res)[:, 0:2]),
+            ), dtype='float')
             sc_name = np.append(sc_name, np.array([criteria.index(sc)] * len(res)))
 
         pareto_front = res_name_f[_get_frontier(res_name_f) == 1]
         pareto_front = pareto_front[pareto_front[:, 0].argsort()]
 
-        ax[r, c].plot(pareto_front[:, 0], pareto_front[:, 1], c="#3D6AE0")
+        ls = []
+        
+        ax[r, c].plot(pareto_front[:, 0], pareto_front[:, 1], c="#3D6AE0", ls='--', zorder=1, label='Pareto frontier' if ds == 0 else None)
+        ax[r,c].grid(alpha=0.8)
+        
+        if ylims:
+            ax[r,c].set_ylim(*ylims)
+        
         for i in range(max(sc_name) + 1):
             # c = '#E0A33D' if i==6 else 'black'
-            col = [katmap[i]]
+            col = [colors[criteria[i]]]
             points = res_name_f[sc_name == i]
             points = points[~np.isnan(points).any(axis=1)]
 
-            if len(points) >= 3:
+            # Plot convex hull around points
+            if len(points) >= 3 and hull:
                 if (
                     len(np.unique(points[:, 0])) > 1
                     and len(np.unique(points[:, 1])) > 1
@@ -329,26 +391,76 @@ def plot_paraeto_hull(results):
                     y_hull = np.append(
                         points[hull.vertices, 1], points[hull.vertices, 1][0]
                     )
-                    ax[r, c].fill(x_hull, y_hull, alpha=0.3, c=col[0])
+                    ax[r, c].fill(x_hull, y_hull, alpha=hull_alpha, c=col[0])
                 else:
                     ax[r, c].plot(points[:, 0], points[:, 1], c=col[0], linewidth=1)
 
-            s = 40 if i == 6 else 20
-            ax[r, c].scatter(
-                res_name_f[sc_name == i, 0],
-                res_name_f[sc_name == i, 1],
-                c=col,
-                s=s,
-                marker=markers[i],
-                zorder=3,
-                label=criteria[i],
-            )
-        ax[r, c].plot(pareto_front[:, 0], pareto_front[:, 1], c="#3D6AE0")
-        if r == 2:
+            x = res_name_f[sc_name == i, 0]
+            y = res_name_f[sc_name == i, 1]
+            non_nan = res_name_f[sc_name==i][~np.any(np.isnan(res_name_f[sc_name==i]), axis=1)]
+            if error == 'percentile':
+                xerr = np.expand_dims(np.array([np.nanmean(x)-np.nanpercentile(x, 2.5), np.nanpercentile(x, 97.5)-np.nanmean(x)]), axis=1)
+                yerr = np.expand_dims(np.array([np.nanmean(y)-np.nanpercentile(y, 2.5), np.nanpercentile(y, 97.5)-np.nanmean(y)]), axis=1)                
+            elif error == 'std':
+                xerr = scipy.stats.sem(x, nan_policy='omit')
+                yerr = scipy.stats.sem(y, nan_policy='omit')
+            else:
+                xerr = None
+                yerr = None
+                
+            if error != 'pca' or points.shape[0] == 0:
+                l = ax[r, c].errorbar(
+                    x=np.nanmean(x),
+                    y=np.nanmean(y),
+                    xerr=xerr,
+                    yerr=yerr,
+                    c=col[0],
+                    #markersize=s,
+                    marker=markers[i],
+                    zorder=3,
+                    label=criteria[i],
+                    markeredgewidth=1,
+                    markeredgecolor='black',
+                    ls=''
+                )
+            elif points.shape[0] > 0:
+                # Plot mean & vectors
+                l = ax[r, c].scatter(
+                    x=np.nanmean(x),
+                    y=np.nanmean(y),
+                    s=marker_size,
+                    c=col,
+                    marker=markers[i],
+                    zorder=3,
+                    label=criteria[i],
+                    linewidths=1,
+                    edgecolors='black'
+                )
+                # X error
+                x_l_t, x_h_t, y_l_t, y_h_t = pca_error_points(res_name_f[sc_name == i], debug=False)
+                
+                ax[r,c].plot(
+                    [x_l_t[0], x_h_t[0]], 
+                    [x_l_t[1], x_h_t[1]], 
+                    color=col[0],
+                    alpha=0.7
+                )
+                ax[r,c].plot(
+                    [y_l_t[0], y_h_t[0]], 
+                    [y_l_t[1], y_h_t[1]], 
+                    color=col[0], 
+                    alpha=0.7
+                )
+                
+            ls.append(l)
+
+        if r == rows-1:
             ax[r, c].set_xlabel("# Instances")
         if c == 0:
             ax[r, c].set_ylabel("Accuracy")
-        if ds == 8:
-            ax[r, c].legend()
+        
         ax[r, c].set_title(datasets[ds])
+        
+    plt.legend(ls, [l.get_label() for l in ls], bbox_to_anchor=(1.05, 2.3), loc='upper left')
+    #plt.tight_layout()
     plt.show()

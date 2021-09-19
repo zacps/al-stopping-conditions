@@ -172,7 +172,7 @@ class CompressedStoreV2:
                     for x in range(i.start, i.stop or self.i, i.step or 1)
                 ]
             except KeyError:
-                raise IndexError(f"index {i} out of range for store of length {self.i}")
+                raise IndexError(f"index {i} out of range for store of length {self.i}\n{self.filename}")
 
         if i < 0:
             # print(f"Negative index {i} for len {self.i} gives a filename of {self.i+i}")
@@ -180,7 +180,7 @@ class CompressedStoreV2:
         try:
             return self.set_pools(pickle.Unpickler(self.zip.open(str(i))).load())
         except KeyError:
-            raise IndexError(f"index {i} out of range for store of length {self.i}")
+            raise IndexError(f"index {i} out of range for store of length {self.i}\n{self.filename}")
 
     def set_pools(self, item):
         if not hasattr(item, "initial_X_labelled"):
