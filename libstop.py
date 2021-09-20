@@ -1189,10 +1189,11 @@ def eval_stopping_conditions(results_plots, classifiers, conditions=None, recomp
             dtype=object
         ).reshape(len(metrics), len(conditions), 2)
 
-        for i, run_id in enumerate(conf.runs):
+        for i in range(len(conditions)):
             try:
-                stop_results[conf.dataset_name][list(conditions.keys())[run_id]] = [
-                    StopResult(
+                assert len(conf.runs) == len(results[:,i])
+                stop_results[conf.dataset_name][list(conditions.keys())[i]] = {
+                    runid: StopResult(
                         x
                             if list(conditions.keys())[i] != "SSNCut"
                             else (x + 10 if x is not None else None),
@@ -1207,8 +1208,8 @@ def eval_stopping_conditions(results_plots, classifiers, conditions=None, recomp
                             else None,
                         metric
                     )
-                    for j, (x, metric) in enumerate(results[:, i])
-                ]
+                    for runid, (j, (x, metric)) in zip(enumerate(results[:, i]), conf.runs)
+                }
             except IndexError as e:
                 print(
                     f"condition {list(conditions.keys())[i]} returned on dataset {conf.dataset_name}:\n{results[:,i]}"
