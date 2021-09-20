@@ -1209,7 +1209,7 @@ def eval_stopping_conditions(results_plots, classifiers, conditions=None, recomp
                             else None,
                         metric
                     )
-                    for runid, (j, (x, metric)) in zip(enumerate(results[:, i]), conf.runs)
+                    for runid, (j, (x, metric)) in zip(conf.runs, enumerate(results[:, i]))
                 }
             except IndexError as e:
                 print(
