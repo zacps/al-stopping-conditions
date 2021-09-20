@@ -1183,17 +1183,15 @@ def eval_stopping_conditions(results_plots, classifiers, conditions=None, recomp
                     config=conf,
                     memory_profile=memory_profile
                 )
-                for j, (clfs_, metric) in enumerate(
-                    zip(clfs, metrics)
-                )
+                for j, clfs_, metric in zip(conf.runs, clfs, metrics)
                 for (name, cond) in conditions.items()
             ), 
             dtype=object
         ).reshape(len(metrics), len(conditions), 2)
 
-        for i in range(len(conditions)):
+        for i, run_id in enumerate(conf.runs):
             try:
-                stop_results[conf.dataset_name][list(conditions.keys())[i]] = [
+                stop_results[conf.dataset_name][list(conditions.keys())[run_id]] = [
                     StopResult(
                         x
                             if list(conditions.keys())[i] != "SSNCut"
@@ -1227,9 +1225,13 @@ def __read_stopping(config_str):
     file = f"{out_dir()}/stopping2/{config_str}.pickle"
     try:
         with open(file, "rb") as f:
-            return dill.load(f)
+            obj = dill.load(f)
+            if type(obj) is list:
+                obj = {i: v for i, v in enumerate(obj)}
+
+            return obj
     except FileNotFoundError:
-        return {}
+        return dict()
 
 
 def __write_stopping(config_str, data):
