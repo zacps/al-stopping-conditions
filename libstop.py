@@ -1178,6 +1178,7 @@ def eval_stopping_conditions(results_plots, classifiers, conditions=None, recomp
                     conf,
                     cond,
                     j,
+                    recompute,
                     **metric,
                     classifiers=clfs_,
                     config=conf,
