@@ -39,7 +39,6 @@ from modAL.utils.data import data_vstack
 from modAL.uncertainty import _proba_uncertainty, classifier_uncertainty
 import scipy
 
-from libplot import plot_classification, plot_poison, c_plot_poison
 from libutil import Metrics, atomic_write, out_dir
 from libstore import store, CompressedStore
 from libconfig import Config

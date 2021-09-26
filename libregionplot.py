@@ -4,6 +4,7 @@ import numpy as np
 import seaborn as sns
 import matplotlib.pyplot as plt
 from matplotlib.colors import ListedColormap
+from matplotlib.ticker import FuncFormatter
 import matplotlib.patches as mpatches
 import ipywidgets as widgets
 
@@ -78,7 +79,7 @@ def make_grid():
     """
     Return a grid on which to plot the criterias' performance
     """
-    A, l = np.mgrid[0:1e6:1000j,0:1e2:1001j]
+    A, l = np.mgrid[0:1e6:1000j,0:1e2:1000j]
     A = A.T
     l = l.T
     return A, l
@@ -105,7 +106,7 @@ def eval_on_grid(A, l, conds, instances_mean, accuracy_mean, instances_upper, ac
     return conds_indeterminate, minimized_error, mean_grid
     
 
-def plot_regions(results_filter, A, l, conds_indeterminate, minimized_error, ax=None, colors=None, title=None, figsize=(10,6), patches=None, left=True):
+def plot_regions(results_filter, A, l, conds_indeterminate, minimized_error, ax=None, colors=None, title=None, figsize=(10,6), patches=None, left=True, bottom=True):
     
     min_ids = np.unique(minimized_error)
     min_keys = conds_indeterminate[min_ids]
@@ -118,22 +119,41 @@ def plot_regions(results_filter, A, l, conds_indeterminate, minimized_error, ax=
     
     if ax is None:
         fig, ax = plt.subplots(1, 1, figsize=figsize)
+        
     if colors is not None:
         cmap = ListedColormap([colors[key] for key in min_keys])
     else:
         cmap = ListedColormap(sns.color_palette("pastel", len(min_ids)).as_hex())
+        
     im = ax.imshow(minimized_mapped, origin='lower', cmap=cmap)
-    xtickspace = np.linspace(0, A.shape[1]-1, 4, dtype=int)
-    ytickspace = np.linspace(0, A.shape[0]-1, 8, dtype=int)
+    
+    # Axis labels, complicated because matplotlib isn't intended for mapped
+    # image pixel labels
+    xtickspace = np.where(np.isclose(A[0,:], np.linspace(0, 1e6, 5).reshape(-1, 1), atol=500))[1]
+    xtickspace = xtickspace[xtickspace!=499] # hack to fix broken tolerance
+    ytickspace = np.where(np.isclose(l[:,0], np.linspace(0, 100, 5).reshape(-1, 1), atol=1e-1))[1]
     ax.set_xticks(xtickspace)
-    ax.set_xticklabels([(fr"${round(x, -4)/1e5:.0f}\times 10^5$" if x != 0 else "$0$") for x in A[0,xtickspace]])
+    def formatter(x, pos):
+        val = A[0,xtickspace][pos]/A[0,xtickspace][-1]*100
+        if True:
+            return f"{val:.0f}"
+        else:
+            return f"{val:.1f}"
+    mformatter = FuncFormatter(formatter)
+    mformatter.set_offset_string(fr"$\times 10^{{{np.log10(A[0,xtickspace][-1])-2:.0f}}}$")
+    ax.xaxis.set_major_formatter(mformatter)
     ax.set_yticks(ytickspace)
     ax.set_yticklabels([f"{x:.0f}" for x in l[ytickspace,0]])
+    
     #ax.grid(alpha=0.7)
+    
     if left:
         ax.set_ylabel('$l$')
-    ax.set_xlabel('$nm$')
+    if bottom:
+        ax.set_xlabel('$nm$')
+        
     ax.set_title(title if title is not None else 'Cost-Optimal Stopping Criteria')
+    
     if patches is None:
         cb = plt.colorbar(im, spacing='uniform')
         cb.set_ticks(mapped_ids)
@@ -148,7 +168,7 @@ def plot_regions(results_filter, A, l, conds_indeterminate, minimized_error, ax=
         ])
     
     
-def regions(results_filter, failed_to_stop='penalty', ax=None, colors=None, title=None, figsize=(10,6), patches=None, left=True):
+def regions(results_filter, failed_to_stop='penalty', ax=None, colors=None, title=None, figsize=(10,6), patches=None, left=True, bottom=True):
     conds, instances_mean, accuracy_mean, instances_upper, accuracy_upper, instances_lower, accuracy_lower = compute_criteria_arrays(
         results_filter, failed_to_stop=failed_to_stop
     )
@@ -156,7 +176,7 @@ def regions(results_filter, failed_to_stop='penalty', ax=None, colors=None, titl
     conds_indeterminate, minimized_error, mean_grid = eval_on_grid(
         A, l, conds, instances_mean, accuracy_mean, instances_upper, accuracy_upper, instances_lower, accuracy_lower
     )
-    plot_regions(results_filter, A, l, conds_indeterminate, minimized_error, ax=ax, colors=colors, title=title, figsize=figsize, patches=patches, left=left)
+    plot_regions(results_filter, A, l, conds_indeterminate, minimized_error, ax=ax, colors=colors, title=title, figsize=figsize, patches=patches, left=left, bottom=bottom)
     
     
 def costs(results_filter, failed_to_stop='penalty'):
@@ -198,13 +218,30 @@ def plot_costs(A, l, conds, instances_mean, mean_grid):
     plt.tight_layout()
 
  
-def optimal_for_params(conds, accuracy_mean, instances_mean, n, m, l):
+def optimal_for_params(conds, accuracy_mean, instances_mean, results_filter, n, m, l, title, average=False):
     values = C_rel_nonvec(accuracy_mean, instances_mean, n*m, l)
     minimum = np.argmin(values)
     print(f"The optimal criteria is {conds[minimum]} with cost ${values[minimum]:.2f}")
+    
+    print(f"The ranking of all criteria is {conds[np.argsort(values)]}")
+    
+    def autorank_func(x, accuracy, f1, roc_auc):
+        #print("in", x, accuracy, f1, roc_auc)
+        ret = C_rel_nonvec(accuracy, x, n*m, l)
+        #print(ret)
+        return ret
+    
+    from libstop import rank_stop_conds
+    rank_stop_conds(
+        results_filter, 
+        "func",
+        func=autorank_func,
+        title=title,
+        average=average
+    )
 
 
-def interactive_explore_cost(results_filter, failed_to_stop='penalty'):
+def interactive_explore_cost(results_filter, failed_to_stop='penalty', title='Example', average=False):
     n_widget = widgets.IntText(
         value=87600,
         description='Expected number of misclassifications n:',
@@ -230,6 +267,9 @@ def interactive_explore_cost(results_filter, failed_to_stop='penalty'):
         conds=widgets.fixed(conds), 
         accuracy_mean=widgets.fixed(accuracy_mean), 
         instances_mean=widgets.fixed(instances_mean),
+        results_filter=widgets.fixed(results_filter),
+        title=widgets.fixed(title),
+        average=widgets.fixed(False),
         n=n_widget, 
         m=m_widget, 
         l=l_widget)

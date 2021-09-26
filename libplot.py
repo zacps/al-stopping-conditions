@@ -83,17 +83,6 @@ def plot_contours(ax, clf, xx, yy, **params):
     return out
 
 
-def plot_poison_contours(ax, attack, xx, yy, **params):
-    Z = np.vectorize(attack.objective_function, signature="(2)->()")(
-        np.concatenate((xx.reshape((xx.size, 1)), yy.reshape((yy.size, 1))), axis=1)
-    )
-    if type(Z) is not np.ndarray:
-        Z = Z.tondarray()
-    Z = Z.reshape(xx.shape)
-    out = ax.contourf(xx, yy, Z, levels=20, **params)
-    return out
-
-
 def plot_classification(ax, clf, X, Y, X_all):
     """
     Plot the results of a classifier
@@ -111,139 +100,6 @@ def plot_classification(ax, clf, X, Y, X_all):
     ax.set_ylim(yy.min(), yy.max())
     ax.set_xticks(())
     ax.set_yticks(())
-
-
-def plot_poison(
-    clf,
-    X_labelled,
-    y_labelled,
-    X_unlabelled,
-    y_unlabelled,
-    X_test,
-    y_test,
-    attack,
-    attack_points,
-    start_points,
-    start_points_y,
-    ax=None,
-):
-    """
-    Plot the results of a poison attack
-    """
-
-    if ax is None:
-        fig, ax = plt.subplots(1, 1, figsize=(15, 15))
-
-    if X_unlabelled is not None:
-        X_all = np.concatenate((X_labelled, X_unlabelled, X_test), axis=0)
-    else:
-        X_all = np.concatenate((X_labelled, X_test), axis=0)
-
-    if X_unlabelled is not None:
-        ax.scatter(X_unlabelled[:, 0], X_unlabelled[:, 1], s=10)
-
-    X0, X1 = X_labelled[:, 0], X_labelled[:, 1]
-    xx, yy = make_meshgrid(X_all[:, 0], X_all[:, 1])
-
-    plot_contours(ax, clf, xx, yy, cmap=plt.cm.coolwarm, alpha=0.8)
-    ax.scatter(X0, X1, c=y_labelled, cmap=plt.cm.coolwarm, s=25, edgecolors="k")
-    ax.set_xlim(xx.min(), xx.max())
-    ax.set_ylim(yy.min(), yy.max())
-    ax.set_xticks(())
-    ax.set_yticks(())
-
-    if len(attack_points.shape) > 2:
-        attack_points = attack_points[0]
-
-    for start, end, start_label in zip(start_points, attack_points, start_points_y):
-        color = "#526dde" if start_label else "#d14138"
-        ax.arrow(
-            start[0],
-            start[1],
-            end[0] - start[0],
-            end[1] - start[1],
-            shape="full",
-            color="black",
-            length_includes_head=True,
-            zorder=1,
-            head_length=0.15,
-            head_width=0.1,
-        )
-
-
-def c_plot_poison(
-    X_labelled,
-    y_labelled,
-    attack,
-    lb,
-    ub,
-    attack_points,
-    start_points,
-    start_points_y,
-    x_seq,
-    ax=None,
-):
-    if ax is None:
-        fig, ax = plt.subplots(1, 1, figsize=(15, 15))
-
-    X0, X1 = X_labelled[:, 0], X_labelled[:, 1]
-    xx, yy = make_meshgrid_bounds(lb[0], ub[0], lb[1], ub[1], h=0.2)
-
-    if attack is not None:
-        plot_poison_contours(ax, attack, xx, yy, cmap="jet", alpha=0.8)
-
-    ax.scatter(X0, X1, c=y_labelled, cmap=plt.cm.coolwarm, s=25, edgecolors="k")
-    ax.set_xlim(xx.min(), xx.max())
-    ax.set_ylim(yy.min(), yy.max())
-    ax.set_xticks(())
-    ax.set_yticks(())
-
-    if attack_points is not None and start_points is not None and x_seq is None:
-        if len(attack_points.shape) > 2:
-            attack_points = attack_points[0]
-
-        for start, end, start_label in zip(start_points, attack_points, start_points_y):
-            color = "#526dde" if start_label else "#d14138"
-            ax.arrow(
-                start[0],
-                start[1],
-                end[0] - start[0],
-                end[1] - start[1],
-                shape="full",
-                color="black",
-                length_includes_head=True,
-                zorder=1,
-                head_length=0.15,
-                head_width=0.1,
-            )
-
-    if x_seq is not None:
-        x_seq = x_seq.tondarray()
-        x_seq = remove_consecutive_dups(x_seq)
-        path = [(Path.MOVETO, x_seq[0]), *[(Path.LINETO, x) for x in x_seq[1:-1]]]
-
-        codes, verts = zip(*path)
-        string_path = Path(verts, codes)
-        patch = patches.PathPatch(string_path, facecolor="none", lw=2)
-
-        ax.add_patch(patch)
-
-        # arrow = Arrow(x_seq[-2][0], x_seq[-2][1], x_seq[-1][0]-x_seq[-2][0], x_seq[-1][1]-x_seq[-2][1])
-        # print("Added arrow")
-        # ax.add_patch(arrow)
-        if len(x_seq) >= 2:
-            ax.arrow(
-                x_seq[-2][0],
-                x_seq[-2][1],
-                x_seq[-1][0] - x_seq[-2][0],
-                x_seq[-1][1] - x_seq[-2][1],
-                shape="full",
-                color="black",
-                length_includes_head=True,
-                zorder=10,
-                head_length=0.05,
-                head_width=0.05,
-            )
 
 
 # See https://stackoverflow.com/questions/5738901/removing-elements-that-have-consecutive-duplicates
@@ -337,7 +193,10 @@ def plot_paraeto_hull(
     hull=True, 
     error='percentile',
     colors=None,
-    marker_size=30
+    marker_size=30,
+    legend_loc='upper left',
+    legend_cols=1,
+    legend_bbox=(1.05, 2.3)
 ):
     datasets = list(results.keys())
     criteria = list({x for r in results.values() for x in r.keys()})
@@ -459,8 +318,11 @@ def plot_paraeto_hull(
         if c == 0:
             ax[r, c].set_ylabel("Accuracy")
         
-        ax[r, c].set_title(datasets[ds])
+        ax[r, c].set_title(datasets[ds].rstrip("-58509"))
+        box = ax[r,c].get_position()
+        ax[r,c].set_position([box.x0, box.y0 + box.height * 0.1,
+                         box.width, box.height * 0.9])
         
-    plt.legend(ls, [l.get_label() for l in ls], bbox_to_anchor=(1.05, 2.3), loc='upper left')
+    plt.legend(ls, [l.get_label() for l in ls], bbox_to_anchor=legend_bbox, loc=legend_loc, ncol=legend_cols)
     #plt.tight_layout()
     plt.show()

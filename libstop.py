@@ -413,7 +413,7 @@ class FirstDiffZeroPerformanceConvergence(PerformanceConvergence):
     def determine_start(self, grad):
         # Find nth value where the threshold is exceeded
         if np.count_nonzero(grad >= self.start_threshold) < self.start_iters:
-            raise FailedToTerminate('FirstDiffZeroOverallUncertainty')
+            raise FailedToTerminate('FirstDiffZeroPerformanceConvergence')
         return np.searchsorted(np.cumsum(grad >= self.start_threshold), self.start_iters)
     
     def condition(self, x, metric):
@@ -802,6 +802,14 @@ class StabilizingPredictions(Criteria):
         if not (metric >= self.threshold).any():
             raise FailedToTerminate("stabilizing_predictions")
         return x[np.argmax(metric >= self.threshold)]
+    
+    
+@dataclass
+class StabilizingPredictionsPlusX(Criteria):
+    add_x: int = 100
+    
+    def condition(self, x, metric):
+        return super().condition(x, metric) + self.add_x
     
     
 @dataclass
@@ -1382,6 +1390,15 @@ def rank_stop_conds(
     data = []
     # n instances data
     for i, dataset in enumerate(stop_results.keys()):
+        
+        max_inst = 0
+        min_acc = 1.
+        for rs in stop_results[dataset].values():
+            for r in rs:
+                if r[0] is not None:
+                    max_inst = max(max_inst, r[0])
+                    min_acc = min(min_acc, r[1])
+        
         for ii, method in enumerate(stop_results[dataset].keys()):
             if i == 0:
                 data.append([])
@@ -1389,15 +1406,20 @@ def rank_stop_conds(
             for iii, (x, accuracy, f1, roc_auc, *_metric) in enumerate(
                 stop_results[dataset][method]
             ):
-                if x is None:
+                if x is None and metric != "func":
                     # TODO: Decide what to do with missing observations
                     values.append(None)
                 elif metric == "instances":
                     values.append(x)
                 elif metric == "func":
-                    values.append(
-                        func(x, accuracy, f1, roc_auc)
-                    )
+                    if x is not None:
+                        values.append(
+                            func(x, accuracy, f1, roc_auc)
+                        )
+                    else:
+                        values.append(
+                            func(max_inst, min_acc, None, None)
+                        )
                 else:
                     metrics = {"accuracy_score": 0, "f1_score": 1, "roc_auc_score": 2}
                     values.append((accuracy, f1, roc_auc)[metrics[metric]])
@@ -1417,7 +1439,7 @@ def rank_stop_conds(
         columns=list(stop_results[list(stop_results.keys())[0]].keys()),
     )
     autoranked = autorank(
-        data, order="ascending" if metric == "instances" else "descending"
+        data, order="ascending" if metric == "instances" or metric == "func" else "descending"
     )
 
     ax = plot_stats(autoranked, ax=ax)
