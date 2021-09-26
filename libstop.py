@@ -139,7 +139,7 @@ class SC_oracle_acc_mcs(Criteria):
     threshold: int = 0.9
 
     def metric(self, classifiers, **kwargs):
-        return acc(classifiers, nth="last")[1]
+        return acc_last(classifiers)[1]
 
 
     def condition(self, x, metric):
@@ -235,7 +235,7 @@ class SSNCut(Criteria):
         **kwargs,
     ):
 
-        if all(getattr(clf.estimator, "kernel", None) != "linear" for clf in classifiers):
+        if any(getattr(clf.estimator, "kernel", None) != "linear" for clf in classifiers):
             raise InvalidAssumption("SSNCut", "model is not a linear SVM")
 
         unique_y = np.unique(classifiers[0].y_training)
@@ -765,7 +765,7 @@ class NSupport(Criteria):
     stable_iters: int = 2
 
     def metric(self, classifiers, n_support, **kwargs):
-        if all(getattr(clf.estimator, "kernel", None) != "linear" for clf in classifiers):
+        if any(getattr(clf.estimator, "kernel", None) != "linear" for clf in classifiers):
             raise InvalidAssumption("n_support only supports linear SVMs")
         return n_support
 
@@ -937,6 +937,35 @@ class GOAL(Criteria):
 # ----------------------------------------------------------------------------------------------
 
 
+def acc_last(classifiers, metric=metrics.accuracy_score):
+    """
+    Calculate the accuracy of earlier classifiers on the current dataset.
+    """
+    x = []
+    diffs = []
+    start = 1
+    
+    pclf = classifiers[0]
+    unique_labels = np.unique(pclf.y_training)
+    for i in range(start, len(classifiers)):
+        clf = classifiers[i]
+        x.append(clf.X_training.shape[0])
+
+        if clf.y_training.shape[0] <= 10:
+            diffs.append(np.inf)
+            continue
+        size = 10
+
+        diffs.append(
+            metric(clf.y_training[-size:], pclf.predict(clf.X_training[-size:]))
+        )
+        pclf = clf
+        gc.collect()
+
+    return x, diffs
+
+
+
 def acc(classifiers, metric=metrics.accuracy_score, nth=0):
     """
     Calculate the accuracy of earlier classifiers on the current dataset.
@@ -995,6 +1024,7 @@ def acc(classifiers, metric=metrics.accuracy_score, nth=0):
             diffs.append(
                 metric(clf.y_training[-size:], pclf.predict(clf.X_training[-size:]))
             )
+        gc.collect()
     return x, diffs
 
 
