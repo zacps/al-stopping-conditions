@@ -74,12 +74,12 @@ def run_passive(datasets, runs, model):
     for name, dataset in datasets:
         if name == "newsgroups":
             continue
-        print(name)
+        #print(name)
         fname = f"{out_dir()}{os.path.sep}passive{os.path.sep}{name}_{model}.pickle"
         try:
             with open(fname, "rb") as f:
                 results = pickle.load(f)
-                print(f"Have results for {name}")
+                #print(f"Have results for {name}")
                 if all([run in results.keys() for run in runs]):
                     all_results[name] = results
                     continue
