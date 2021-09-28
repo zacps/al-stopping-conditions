@@ -358,8 +358,8 @@ class PerformanceConvergence(Criteria):
             w2 = self.average(windows[i])
             w1 = self.average(windows[i - 1])
             g = w2 - w1
-            if windows[i][-1] > np.max(metric[: i + self.k]) and g > 0 and g < self.threshold:
-                return x.iloc[i + self.k]
+            if windows[i][-1] > np.max(metric[: i + self.k - 1]) and g > 0 and g < self.threshold:
+                return x.iloc[i + self.k-1]
 
         raise FailedToTerminate("performance_convergence")
         
@@ -451,25 +451,25 @@ class UncertaintyConvergence(Criteria):
     https://www.aclweb.org/anthology/C08-1059.pdf
     """
 
-    metric_func: Callable = classifier_entropy
-    aggregator: Callable = np.min
     threshold: float = 5e-5
     k: int = 10
     average: Callable = np.median
 
     def metric(self, classifiers, **kwargs):
-        return metric_selected(classifiers, self.metric_func)
+        # Maximum entropy in the selected batch of instances
+        return metric_selected(classifiers, classifier_uncertainty, aggregator=np.max)
 
     def condition(self, x, metric):
+        metric = 1 - np.array(metric)
         windows = np.lib.stride_tricks.sliding_window_view(metric, self.k)
         for i in range(1, len(windows)):
             w2 = self.average(windows[i])
             w1 = self.average(windows[i - 1])
             g = w2 - w1
-            if windows[i][-1] > np.max(metric[: i + self.k]) and g > 0 and g < self.threshold:
-                return x.iloc[i + self.k]
+            if windows[i][-1] > np.max(metric[: i + self.k - 1]) and g > 0 and g < self.threshold:
+                return x.iloc[i + self.k - 1]
 
-        raise FailedToTerminate("performance_convergence")
+        raise FailedToTerminate("UncertaintyConvergence")
 
 
 @dataclass
@@ -635,7 +635,6 @@ class ClassificationChange(Criteria):
         yield np.nan
 
         for i in range(1, len(classifiers)):
-            # print(f"At iteration {i} unlabelled pool has shape {X_unlabelled.shape if X_unlabelled is not None else 'None'}")
             yield np.count_nonzero(
                 classifiers[i - 1].predict(classifiers[i].X_unlabelled)
                 == classifiers[i].predict(classifiers[i].X_unlabelled)
@@ -849,11 +848,12 @@ def metric_selected(classifiers, metric, aggregator=np.min, **kwargs):
 
     The metric is then aggregated across the batch by the `aggregator` to produce a single value per round.
     """
+    
     for i in range(1, len(classifiers)):
         yield aggregator(
             metric(classifiers[i - 1].estimator, classifiers[i].X_training[-10:])
         )
-
+        
     yield np.nan
 
 
@@ -863,7 +863,7 @@ class MaxConfidence(Criteria):
     This strategy is based on uncertainty measurement, considering whether the entropy of each selected unlabelled
     example is less than a very small predefined threshold close to zero, such as 0.001.
 
-    Note: The original authors only considered non-batch mode AL. We stop based on the mean of the entropy.
+    Note: The original authors only considered non-batch mode AL. We stop based on the min of the entropy.
 
     https://www.aclweb.org/anthology/D07-1082.pdf
     """
@@ -871,7 +871,7 @@ class MaxConfidence(Criteria):
     threshold: float = 0.001
 
     def metric(self, classifiers, **kwargs):
-        return np.array(metric_selected(classifiers, classifier_entropy))
+        return np.array(metric_selected(classifiers, classifier_entropy, aggregator=np.min))
 
 
     def condition(self, x, metric):
