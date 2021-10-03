@@ -80,6 +80,7 @@ def run(
     fragment_run_start=None,
     fragment_run_end=None,
     dry_run=False,
+    ret_classifiers=True
 ):
     print(sys.argv)
     print(
@@ -154,7 +155,7 @@ def run(
             )
             for config in configurations
         )
-        if configurations.meta["ret_classifiers"]:
+        if configurations.meta["ret_classifiers"] and ret_classifiers:
             # Figure out what runs we care about
             if fragment_run_start is not None:
                 if fragment_run_end is not None:

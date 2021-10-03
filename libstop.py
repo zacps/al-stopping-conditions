@@ -67,7 +67,7 @@ from tabulate import tabulate
 from statsmodels.stats.inter_rater import fleiss_kappa
 from autorank import autorank, plot_stats
 from tvregdiff.tvregdiff import TVRegDiff
-from modAL.uncertainty import classifier_entropy
+from modAL.uncertainty import classifier_entropy, classifier_uncertainty
 
 import libdatasets
 from libutil import out_dir, listify
@@ -167,8 +167,13 @@ class SC_mes(Criteria):
 
     threshold: int = 1e-2
 
-    def metric(self, expected_error_min, **kwargs):
-        return expected_error_min
+    def metric(self, classifiers, **kwargs):
+        out = []
+        for clf in classifiers:
+            max_pred = np.max(clf.predict_proba(clf.X_unlabelled), axis=1)
+            assert max_pred.shape[0] == clf.X_unlabelled.shape[0]
+            out.append((1/clf.X_unlabelled.shape[0]) * np.sum(1 - max_pred))
+        return np.array(out)
 
     def condition(self, x, metric):
         if (metric <= self.threshold).any():
@@ -941,8 +946,8 @@ def acc_last(classifiers, metric=metrics.accuracy_score):
     """
     Calculate the accuracy of earlier classifiers on the current dataset.
     """
-    x = []
-    diffs = []
+    x = [classifiers[0].X_training.shape[0]]
+    diffs = [np.nan]
     start = 1
     
     pclf = classifiers[0]
@@ -960,7 +965,6 @@ def acc_last(classifiers, metric=metrics.accuracy_score):
             metric(clf.y_training[-size:], pclf.predict(clf.X_training[-size:]))
         )
         pclf = clf
-        gc.collect()
 
     return x, diffs
 
@@ -1024,7 +1028,6 @@ def acc(classifiers, metric=metrics.accuracy_score, nth=0):
             diffs.append(
                 metric(clf.y_training[-size:], pclf.predict(clf.X_training[-size:]))
             )
-        gc.collect()
     return x, diffs
 
 
@@ -1196,6 +1199,8 @@ def eval_stopping_conditions(results_plots, classifiers, conditions=None, recomp
         conditions = {
             f"{f.display_name}": f for f in Criteria.all_criteria()
         }
+    if classifiers is None:
+        classifiers = itertools.repeat(itertools.repeat(None))
 
     stop_results = {}
 
@@ -1468,6 +1473,7 @@ def rank_stop_conds(
         np.array(data).T,
         columns=list(stop_results[list(stop_results.keys())[0]].keys()),
     )
+    print(data.shape)
     autoranked = autorank(
         data, order="ascending" if metric == "instances" or metric == "func" else "descending"
     )
