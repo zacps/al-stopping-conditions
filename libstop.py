@@ -169,10 +169,12 @@ class SC_mes(Criteria):
 
     def metric(self, classifiers, **kwargs):
         out = []
-        for clf in classifiers:
-            max_pred = np.max(clf.predict_proba(clf.X_unlabelled), axis=1)
-            assert max_pred.shape[0] == clf.X_unlabelled.shape[0]
-            out.append((1/clf.X_unlabelled.shape[0]) * np.sum(1 - max_pred))
+        rand = np.random.default_rng(42)
+        for i, clf in enumerate(classifiers):            
+            subsample = rand.choice(clf.X_unlabelled.shape[0], min(1000, clf.X_unlabelled.shape[0]), replace=False)
+            
+            max_pred = np.max(clf.predict_proba(clf.X_unlabelled[subsample]), axis=1)
+            out.append((1/subsample.shape[0]) * np.sum(1 - max_pred))
         return np.array(out)
 
     def condition(self, x, metric):
@@ -215,11 +217,11 @@ class EVM(Criteria):
                 current += 1
             last = value
         raise FailedToTerminate("EVM")
-
+        
 
 class VM(EVM):
     m: float = 0
-
+        
 
 @dataclass
 class SSNCut(Criteria):
@@ -254,7 +256,7 @@ class SSNCut(Criteria):
         for i, clf in enumerate(classifiers):
             # Note: With non-binary classification the value of the decision function is a transformation of the distance...
             order = np.argsort(np.abs(clf.estimator.decision_function(clf.X_unlabelled)))
-            M = clf.X_unlabelled[order[: min(1000, int(self.m * clf.X_unlabelled.shape[0]))]]
+            M = clf.X_unlabelled[order[: min(1000, clf.X_unlabelled.shape[0])]]
 
             y0 = clf.predict(M)
 
@@ -638,12 +640,18 @@ class ClassificationChange(Criteria):
     @listify
     def metric(self, classifiers, **kwargs):
         yield np.nan
+        rand = np.random.default_rng(42)
 
         for i in range(1, len(classifiers)):
+            X_subsampled = classifiers[i].X_unlabelled[rand.choice(
+                classifiers[i].X_unlabelled.shape[0], 
+                min(1000, classifiers[i].X_unlabelled.shape[0]),
+                replace=False
+            )]
             yield np.count_nonzero(
-                classifiers[i - 1].predict(classifiers[i].X_unlabelled)
-                == classifiers[i].predict(classifiers[i].X_unlabelled)
-            ) / classifiers[i].X_unlabelled.shape[0]
+                classifiers[i - 1].predict(X_subsampled)
+                == classifiers[i].predict(X_subsampled)
+            ) / X_subsampled.shape[0]
 
     def condition(self, x, metric):
         if not any(np.isclose(x, 1) for x in metric):
