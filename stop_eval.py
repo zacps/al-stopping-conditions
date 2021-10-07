@@ -36,7 +36,7 @@ matrix = {
         ("uncertainty", partial(uncertainty_stop, n_instances=10)),
     ],
     "models": [
-        "svm-linear",
+        "svm-linear", "random-forest", "neural-network"
     ],
     "meta": {
         "dataset_size": 1000,
@@ -83,18 +83,18 @@ def main(args):
 
     conditions = {
         "SSNCut": SSNCut,
-        # "SC_entropy_mcs": SC_entropy_mcs,
+        "SC_entropy_mcs": SC_entropy_mcs,
         "SC_mes": SC_mes,
-        # "SC_oracle_acc": SC_oracle_acc_mcs,
-        # "Stabilizing Predictions": StabilizingPredictions,
-        # "Performance Convergence": PerformanceConvergence,
-        # "Uncertainty Convergence": UncertaintyConvergence,
-        # "Max Confidence": MaxConfidence,
-        # "EVM": EVM,
-        # "VM": VM,
-        # "Contradictory Information": ContradictoryInformation,
+        "SC_oracle_acc": SC_oracle_acc_mcs,
+        "Stabilizing Predictions": StabilizingPredictions,
+        "Performance Convergence": PerformanceConvergence,
+        "Uncertainty Convergence": UncertaintyConvergence,
+        "Max Confidence": MaxConfidence,
+        "EVM": EVM,
+        "VM": VM,
+        "Contradictory Information": ContradictoryInformation,
         "Classification Change": ClassificationChange,
-        # "Overall Uncertainty": OverallUncertainty,
+        "Overall Uncertainty": OverallUncertainty,
     }
 
     s = time.monotonic()
@@ -102,7 +102,7 @@ def main(args):
         results_plots,
         classifiers,
         conditions=conditions,
-        recompute=["SC_mes", "Classification Change", "SSNCut"],
+        recompute=[],
         jobs=args.jobs,
     )
     print(
