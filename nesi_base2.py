@@ -35,7 +35,7 @@ matrix = {
     "methods": [
         ("uncertainty", partial(uncertainty_stop, n_instances=10)),
     ],
-    "models": ["svm-linear"],
+    "models": ["svm-linear", "random-forest", "neural-network"],
     "meta": {
         "dataset_size": 1000,
         "labelled_size": 10,
