@@ -14,8 +14,16 @@ ytick.labelsize: 10
 axes.labelsize: 12
 font.size: 10
 axes.prop_cycle : (cycler('color', ['bc80bd' ,'fb8072', 'b3de69','fdb462','fccde5','8dd3c7','ffed6f','bebada','80b1d3', 'ccebc5', 'd9d9d9']))
+
+# Latex math font and Arial text font (journal suggested)
+#mathtext.fontset: cm
+#font.family: sans-serif
+#font.sans-serif: Arial
+
+# Stix for both (looks better)
 mathtext.fontset: stix
 font.family: STIXGeneral
+
 lines.linewidth: 2
 legend.frameon: True
 legend.framealpha: 0.8

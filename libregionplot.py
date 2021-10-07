@@ -7,25 +7,66 @@ from matplotlib.colors import ListedColormap
 from matplotlib.ticker import FuncFormatter
 import matplotlib.patches as mpatches
 import ipywidgets as widgets
+from mimic_alpha import colorAlpha_to_rgb as color_alpha
+import scipy.stats
 
-def compute_criteria_arrays(results_filter, failed_to_stop='penalty'):
+
+def compute_criteria_arrays_autorank(results_filter, failed_to_stop='penalty'):
     """
-    Return arrays of stop points suitable for the region plots
+    Return arrays of stop points suitable for autorank. In comparison to the region plot
+    version this is not averaged.
     """
     instances = {}
     accuracy = {}
+    to_exclude = set()
     for dataset, results in results_filter.items():
         for cond, runs in results.items():
             instances.setdefault(cond, [])
             accuracy.setdefault(cond, [])
             for run in runs:
                 if run[0] is not None:
-                    try:
-                        instances[cond].append(run[0])
-                        accuracy[cond].append(run[1])
-                    except KeyError:
-                        # Criteria was excluded because it failed to stop
+                    instances[cond].append(run[0])
+                    accuracy[cond].append(run[1])
+                else:
+                    if failed_to_stop == 'penalty':
+                        # Penalize criteria which fail to stop so they are less likely to take places in the plot.
+                        max_inst = 0
+                        min_acc = 1.
+                        for rs in results.values():
+                            for r in rs:
+                                if r[0] is not None:
+                                    max_inst = max(max_inst, r[0])
+                                    min_acc = min(min_acc, r[1])
+                        instances[cond].append(max_inst)
+                        accuracy[cond].append(min_acc)
+                    elif failed_to_stop == 'exclude':
+                        to_exclude.add(cond)
+                    elif failed_to_stop == 'include':
                         pass
+                    else:
+                        raise Exception(f'invalid failed_to_stop value {failed_to_stop}')
+            
+    for excluded in to_exclude:
+        del instances[excluded]
+        del accuracy[excluded]
+    return np.array(list(instances.keys())), np.array(list(instances.values())), np.array(list(accuracy.values()))
+
+
+def compute_criteria_arrays(results_filter, failed_to_stop='penalty', aggregate=np.mean):
+    """
+    Return arrays of stop points suitable for the region plots
+    """
+    instances = {}
+    accuracy = {}
+    to_exclude = set()
+    for dataset, results in results_filter.items():
+        for cond, runs in results.items():
+            instances.setdefault(cond, [])
+            accuracy.setdefault(cond, [])
+            for run in runs:
+                if run[0] is not None:
+                    instances[cond].append(run[0])
+                    accuracy[cond].append(run[1])
                 else:
                     if failed_to_stop == 'penalty':
                         # Penalize criteria which fail to stop so they are less likely to take places in the plot.
@@ -40,14 +81,15 @@ def compute_criteria_arrays(results_filter, failed_to_stop='penalty'):
                         instances[cond].append(max_inst)
                         accuracy[cond].append(min_acc)
                     elif failed_to_stop == 'exclude':
-                        if cond in instances:
-                            del instances[cond]
-                            del accuracy[cond]
+                        to_exclude.add(cond)
                     elif failed_to_stop == 'include':
                         pass
                     else:
                         raise Exception(f'invalid failed_to_stop value {failed_to_stop}')
 
+    for excluded in to_exclude:
+        del instances[excluded]
+        del accuracy[excluded]
     instances_mean = []
     accuracy_mean = []
     instances_upper = []
@@ -56,14 +98,14 @@ def compute_criteria_arrays(results_filter, failed_to_stop='penalty'):
     accuracy_lower = []
     for cond in instances.keys():
         if len(instances[cond]) > 0:
-            instances_mean.append(np.mean(instances[cond]))
-            accuracy_mean.append(np.mean(accuracy[cond]))
+            instances_mean.append(aggregate(instances[cond]))
+            accuracy_mean.append(aggregate(accuracy[cond]))
 
-            instances_upper.append(np.percentile(instances[cond], 97.5))
-            accuracy_upper.append(np.percentile(accuracy[cond], 2.5))
+            instances_upper.append(instances_mean[-1] + scipy.stats.sem(instances[cond]))
+            accuracy_upper.append(accuracy_mean[-1] + scipy.stats.sem(accuracy[cond]))
 
-            instances_lower.append(np.percentile(instances[cond], 97.5))
-            accuracy_lower.append(np.percentile(accuracy[cond], 2.5))
+            instances_lower.append(instances_mean[-1] - scipy.stats.sem(instances[cond]))
+            accuracy_lower.append(accuracy_mean[-1] - scipy.stats.sem(accuracy[cond]))
             
     return np.array(list(instances.keys())), np.array(instances_mean), np.array(accuracy_mean), np.array(instances_upper), np.array(accuracy_upper), np.array(instances_lower), np.array(accuracy_lower)
 
@@ -75,17 +117,17 @@ def C_rel_nonvec(accuracy, instances, A, l):
 C_rel = np.vectorize(C_rel_nonvec, signature="(),(),(a,b),(a,b)->(a,b)")
 
 
-def make_grid():
+def make_grid(n=1000j):
     """
     Return a grid on which to plot the criterias' performance
     """
-    A, l = np.mgrid[0:1e6:1000j,0:1e2:1000j]
+    A, l = np.mgrid[0:1e6:n,0:1e2:n]
     A = A.T
     l = l.T
     return A, l
 
 
-def eval_on_grid(A, l, conds, instances_mean, accuracy_mean, instances_upper, accuracy_upper, instances_lower, accuracy_lower):
+def eval_on_grid(A, l, conds, instances_mean, accuracy_mean, instances_upper, accuracy_upper, instances_lower, accuracy_lower, alpha_max=1, error_alpha=False):
     mean_grid = C_rel(accuracy_mean, instances_mean, A, l)
     # highest cost is lowest accuracy & most instances
     upper_grid = C_rel(accuracy_lower, instances_upper, A, l)
@@ -98,15 +140,37 @@ def eval_on_grid(A, l, conds, instances_mean, accuracy_mean, instances_upper, ac
     
     conds_indeterminate = np.append(conds, 'Indeterminate')
     
-    # Set regions where criteria are not statistically different from one another to an indeterminate color
-    # TODO: Represent this with alpha instead?
-    minimized_error = np.copy(minimized_mean)
-    minimized_error[minimized_upper!=minimized_lower] = conds_indeterminate.shape[0]-1
+    if error_alpha:
+        # cost of best
+        best = np.min(upper_grid, axis=0)
+        # cost of second best
+        second = np.partition(lower_grid, 1, axis=0)[1]
+        # difference in costs
+        diffs = best - second
+        mean_diffs = np.abs(np.min(mean_grid, axis=0) - np.partition(mean_grid, 1, axis=0)[1])
+        del second, best
+        # absolute difference in costs, not necessary? doesn't matter
+        cost_diffs = np.abs(diffs)
+        del diffs
+        # Normalize so maximum difference is 1
+        print(np.max(cost_diffs))
+        cost_diffs = cost_diffs/mean_diffs
+        cost_diffs = cost_diffs/np.max(cost_diffs)
+        # Turn distance into similarity
+        #cost_similarity = 1 - cost_diffs
+        cost_similarity = cost_diffs
+        print("Cost similarity:", np.min(cost_similarity), np.mean(cost_similarity), np.max(cost_similarity))
+        del cost_diffs
+        alpha_map = np.where(minimized_upper!=minimized_lower, cost_similarity, alpha_max)
+    else:
+        # Set regions where criteria are not statistically different from one another to an indeterminate color
+        minimized_mean[minimized_upper!=minimized_lower] = conds_indeterminate.shape[0]-1
+        alpha_map = np.full(minimized_mean.shape, alpha_max)
     
-    return conds_indeterminate, minimized_error, mean_grid
+    return conds_indeterminate, minimized_mean, mean_grid, alpha_map
     
 
-def plot_regions(results_filter, A, l, conds_indeterminate, minimized_error, ax=None, colors=None, title=None, figsize=(10,6), patches=None, left=True, bottom=True):
+def plot_regions(results_filter, A, l, conds_indeterminate, minimized_error, ax=None, colors=None, title=None, figsize=(10,6), patches=None, left=True, bottom=True, alpha=1, alpha_map=None):
     
     min_ids = np.unique(minimized_error)
     min_keys = conds_indeterminate[min_ids]
@@ -121,11 +185,15 @@ def plot_regions(results_filter, A, l, conds_indeterminate, minimized_error, ax=
         fig, ax = plt.subplots(1, 1, figsize=figsize)
         
     if colors is not None:
-        cmap = ListedColormap([colors[key] for key in min_keys])
+        colors_extended = colors.copy()
+        #colors_extended.setdefault('Indeterminate', '#808080')
+        colors_extended['Indeterminate'] = '#eaeaf2'
+        cmap = ListedColormap([colors_extended[key] for key in min_keys])
     else:
+        raise Exception("no longer supported")
         cmap = ListedColormap(sns.color_palette("pastel", len(min_ids)).as_hex())
         
-    im = ax.imshow(minimized_mapped, origin='lower', cmap=cmap)
+    im = ax.imshow(minimized_mapped, origin='lower', cmap=cmap, alpha=alpha_map)#alpha=alpha)
     
     # Axis labels, complicated because matplotlib isn't intended for mapped
     # image pixel labels
@@ -136,11 +204,12 @@ def plot_regions(results_filter, A, l, conds_indeterminate, minimized_error, ax=
     def formatter(x, pos):
         val = A[0,xtickspace][pos]/A[0,xtickspace][-1]*100
         if True:
-            return f"{val:.0f}"
+            return f"{val:.0f}k"
         else:
-            return f"{val:.1f}"
+            return f"{val:.1f}k"
     mformatter = FuncFormatter(formatter)
-    mformatter.set_offset_string(fr"$\times 10^{{{np.log10(A[0,xtickspace][-1])-2:.0f}}}$")
+    #mformatter.set_offset_string(fr"$\times 10^{{{np.log10(A[0,xtickspace][-1])-2:.0f}}}$")
+    mformatter.set_offset_string("")
     ax.xaxis.set_major_formatter(mformatter)
     ax.set_yticks(ytickspace)
     ax.set_yticklabels([f"{x:.0f}" for x in l[ytickspace,0]])
@@ -148,9 +217,9 @@ def plot_regions(results_filter, A, l, conds_indeterminate, minimized_error, ax=
     #ax.grid(alpha=0.7)
     
     if left:
-        ax.set_ylabel('$l$')
+        ax.set_ylabel('Labeling cost $l$')
     if bottom:
-        ax.set_xlabel('$nm$')
+        ax.set_xlabel('Error cost $nm$')
         
     ax.set_title(title if title is not None else 'Cost-Optimal Stopping Criteria')
     
@@ -164,19 +233,19 @@ def plot_regions(results_filter, A, l, conds_indeterminate, minimized_error, ax=
         c = [im.cmap(im.norm(value)) for value in values]
         existing = {patch.get_label() for patch in patches}
         patches.extend([
-            mpatches.Patch(color=c[i], label=min_keys[i]) for i in range(values.shape[0]) if min_keys[i] not in existing
+            mpatches.Patch(color=color_alpha([c[i]], alpha=np.max(alpha_map))[0], label=min_keys[i]) for i in range(values.shape[0]) if min_keys[i] not in existing
         ])
     
     
-def regions(results_filter, failed_to_stop='penalty', ax=None, colors=None, title=None, figsize=(10,6), patches=None, left=True, bottom=True):
+def regions(results_filter, failed_to_stop='penalty', ax=None, colors=None, title=None, figsize=(10,6), patches=None, left=True, bottom=True, alpha=1, aggregate=np.mean, n_grid=1000j, error_alpha=False):
     conds, instances_mean, accuracy_mean, instances_upper, accuracy_upper, instances_lower, accuracy_lower = compute_criteria_arrays(
-        results_filter, failed_to_stop=failed_to_stop
+        results_filter, failed_to_stop=failed_to_stop, aggregate=aggregate
     )
-    A, l = make_grid()
-    conds_indeterminate, minimized_error, mean_grid = eval_on_grid(
-        A, l, conds, instances_mean, accuracy_mean, instances_upper, accuracy_upper, instances_lower, accuracy_lower
+    A, l = make_grid(n_grid)
+    conds_indeterminate, minimized_error, mean_grid, alpha_map = eval_on_grid(
+        A, l, conds, instances_mean, accuracy_mean, instances_upper, accuracy_upper, instances_lower, accuracy_lower, alpha_max=alpha, error_alpha=error_alpha
     )
-    plot_regions(results_filter, A, l, conds_indeterminate, minimized_error, ax=ax, colors=colors, title=title, figsize=figsize, patches=patches, left=left, bottom=bottom)
+    plot_regions(results_filter, A, l, conds_indeterminate, minimized_error, ax=ax, colors=colors, title=title, figsize=figsize, patches=patches, left=left, bottom=bottom, alpha_map=alpha_map)
     
     
 def costs(results_filter, failed_to_stop='penalty'):
@@ -218,7 +287,7 @@ def plot_costs(A, l, conds, instances_mean, mean_grid):
     plt.tight_layout()
 
  
-def optimal_for_params(conds, accuracy_mean, instances_mean, results_filter, n, m, l, title, average=False):
+def optimal_for_params(conds, accuracy_mean, instances_mean, results_filter, n, m, l, title, average=False, dpi=125):
     values = C_rel_nonvec(accuracy_mean, instances_mean, n*m, l)
     minimum = np.argmin(values)
     print(f"The optimal criteria is {conds[minimum]} with cost ${values[minimum]:.2f}")
@@ -232,16 +301,18 @@ def optimal_for_params(conds, accuracy_mean, instances_mean, results_filter, n, 
         return ret
     
     from libstop import rank_stop_conds
+    fig, ax = plt.subplots(1,1, dpi=dpi, figsize=(7,4))
     rank_stop_conds(
         results_filter, 
         "func",
         func=autorank_func,
         title=title,
-        average=average
+        average=average,
+        ax=ax
     )
 
 
-def interactive_explore_cost(results_filter, failed_to_stop='penalty', title='Example', average=False):
+def interactive_explore_cost(results_filter, failed_to_stop='penalty', title='Example', average=False, dpi=125):
     n_widget = widgets.IntText(
         value=87600,
         description='Expected number of misclassifications n:',
@@ -270,6 +341,7 @@ def interactive_explore_cost(results_filter, failed_to_stop='penalty', title='Ex
         results_filter=widgets.fixed(results_filter),
         title=widgets.fixed(title),
         average=widgets.fixed(False),
+        dpi=widgets.fixed(dpi),
         n=n_widget, 
         m=m_widget, 
         l=l_widget)

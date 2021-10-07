@@ -235,13 +235,15 @@ class SSNCut(Criteria):
     """
 
     m: float = 0.2
+    verbose: bool = False
 
     def metric(
         self,
         classifiers,
         **kwargs,
     ):
-
+        if self.verbose:
+            print("SSNCut metric start")
         if any(getattr(clf.estimator, "kernel", None) != "linear" for clf in classifiers):
             raise InvalidAssumption("SSNCut", "model is not a linear SVM")
 
@@ -252,8 +254,11 @@ class SSNCut(Criteria):
         clustering = SpectralClustering(n_clusters=unique_y.shape[0], affinity='precomputed')
 
         out = []
-
+        
+        if self.verbose:
+            print(f"0/{len(classifiers)}")
         for i, clf in enumerate(classifiers):
+            t0 = time.monotonic()
             # Note: With non-binary classification the value of the decision function is a transformation of the distance...
             order = np.argsort(np.abs(clf.estimator.decision_function(clf.X_unlabelled)))
             M = clf.X_unlabelled[order[: min(1000, clf.X_unlabelled.shape[0])]]
@@ -273,7 +278,10 @@ class SSNCut(Criteria):
             if diff > 0.5:
                 diff = 1 - diff
             out.append(diff)
-
+            
+            if self.verbose:
+                print(f"{time.monotonic()-t0:.2f},")
+            
         return out
 
     def condition(self, x, metric):
@@ -1202,7 +1210,7 @@ def eval_cond(dataset_results: Dict, name: str, conf: Config, condcls: Type, j: 
         print(f"Evaluating {name} on {conf.dataset_name} took:", str(datetime.timedelta(seconds=time.monotonic()-metric_start)))
 
 
-def eval_stopping_conditions(results_plots, classifiers, conditions=None, recompute=[], jobs=None, save=True, memory_profile=False):
+def eval_stopping_conditions(results_plots, classifiers, conditions=None, recompute=[], jobs=None, save=True, memory_profile=False, write_dir='stopping2'):
     if conditions is None:
         conditions = {
             f"{f.display_name}": f for f in Criteria.all_criteria()
@@ -1269,7 +1277,7 @@ def eval_stopping_conditions(results_plots, classifiers, conditions=None, recomp
                 raise e
         if save:
             print(f"Saving stop results to {conf.serialize()}")
-            __write_stopping(conf.serialize(), stop_results[conf.dataset_name])
+            __write_stopping(conf.serialize(), stop_results[conf.dataset_name], write_dir)
 
     return (conditions, stop_results)
 
@@ -1287,8 +1295,8 @@ def __read_stopping(config_str):
         return dict()
 
 
-def __write_stopping(config_str, data):
-    file = f"{out_dir()}/stopping2/{config_str}.pickle"
+def __write_stopping(config_str, data, write_dir):
+    file = f"{out_dir()}/{write_dir}/{config_str}.pickle"
     with open(file, "wb") as f:
         return dill.dump(data, f)
 

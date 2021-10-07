@@ -37,8 +37,7 @@ matrix = {
         ("uncertainty", partial(uncertainty_stop, n_instances=10)),
     ],
     "models": [
-        "random-forest",
-        "neural-network"
+        "svm-linear",
     ],
     "meta": {
         "dataset_size": 1000,
@@ -55,8 +54,6 @@ matrix = {
 }
 
 def main(args):
-    os.environ['OUT_DIR'] = "/home/zpul156/out_nobackup"
-
     fragment_run = args.fragment_run.split('-')
     start = int(fragment_run[0])
     if len(fragment_run) == 2:
@@ -73,22 +70,23 @@ def main(args):
 
     conditions = {
         "SSNCut": SSNCut,
-        "SC_entropy_mcs": SC_entropy_mcs,
-        "SC_oracle_acc": SC_oracle_acc_mcs,
-        "Stabilizing Predictions": StabilizingPredictions,
-        "Performance Convergence": PerformanceConvergence,
-        "Uncertainty Convergence": UncertaintyConvergence,
-        "Max Confidence": MaxConfidence,
-        "EVM": EVM,
-        "VM": VM,
-        "Contradictory Information": ContradictoryInformation,
+        #"SC_entropy_mcs": SC_entropy_mcs,
+        "SC_mes": SC_mes,
+        #"SC_oracle_acc": SC_oracle_acc_mcs,
+        #"Stabilizing Predictions": StabilizingPredictions,
+        #"Performance Convergence": PerformanceConvergence,
+        #"Uncertainty Convergence": UncertaintyConvergence,
+        #"Max Confidence": MaxConfidence,
+        #"EVM": EVM,
+        #"VM": VM,
+        #"Contradictory Information": ContradictoryInformation,
         "Classification Change": ClassificationChange,
-        "Overall Uncertainty": OverallUncertainty,
+        #"Overall Uncertainty": OverallUncertainty,
     }
 
     s = time.monotonic()
     stop_conditions, stop_results = libstop.eval_stopping_conditions(
-        results_plots, classifiers, conditions=conditions, recompute=[], jobs=args.jobs
+        results_plots, classifiers, conditions=conditions, recompute=["SC_mes", "Classification Change", "SSNCut"], jobs=args.jobs
     )
     print("Computing stop conditions took:", str(datetime.timedelta(seconds=time.monotonic()-s)))
 
