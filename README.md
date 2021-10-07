@@ -1,10 +1,10 @@
-# Adversarial Active Learning
+# Hitting the Target: Stopping Active Learning at the Cost-Based Optimum
 
-This repository contains the code from a summer research project at the University of Auckland.
-
-An early draft of the report can be found [here](https://www.overleaf.com/read/yvghhwrnpvmk).
+This repository contains the code for the paper 'Hitting the Target: Stopping Active Learning at the Cost-Based Optimum'.
 
 ## Installation
+
+Necesssary dependencies can be installed with:
 
 ```bash
 $ pip install poetry
@@ -12,6 +12,16 @@ $ poetry install
 ```
 
 ## Reproducing
+
+There are three parts to running the results:
+
+1. Perform the active learning runs
+2. Evaluate the stopping criteria
+3. Produce the figures and other summary results
+
+### Active Learning Runs
+
+Running the active learning process is time consuming and computationally expensive. For the paper a dedicated 72 core machine was used for the SVM results while the neural net.
 
 ```bash
 $ poetry run jupyter notebook
@@ -37,6 +47,6 @@ As this repository contains the complete code used to produce the results in the
 
 ## License
 
-All datasets are the property of their respective owners.
+All datasets are the property of their respective owners and are not redistributed with this repository.
 
-Unless otherwise specified all code, including notebooks, are licensed under GPL. The text of this license can be found in [LICENSE]().
+Unless otherwise specified all code, including notebooks, are licensed under GPL v2. The text of this license can be found in [LICENSE](LICENSE).
