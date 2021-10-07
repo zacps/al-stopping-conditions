@@ -28,7 +28,6 @@ matrix = {
         ("sensorless", wrap(sensorless, None)),
         ("splice", wrap(splice, None)),
         ("anuran", wrap(anuran, None)),
-        
     ],
     "dataset_mutators": {
         "none": (lambda *x, **kwargs: x),
@@ -48,13 +47,17 @@ matrix = {
         "ensure_y": True,
         "stop_info": True,
         "aggregate": False,
-        "stop_function": ("res500", lambda learner, matrix, state: state.X_unlabelled.shape[0] < 510),
-        "pool_subsample": 1000
-    }
+        "stop_function": (
+            "res500",
+            lambda learner, matrix, state: state.X_unlabelled.shape[0] < 510,
+        ),
+        "pool_subsample": 1000,
+    },
 }
 
+
 def main(args):
-    fragment_run = args.fragment_run.split('-')
+    fragment_run = args.fragment_run.split("-")
     start = int(fragment_run[0])
     if len(fragment_run) == 2:
         end = int(fragment_run[1])
@@ -62,40 +65,58 @@ def main(args):
         end = None
 
     s = time.monotonic()
-    results = librun.run(matrix, force_cache=True, fragment_id=args.fragment_id, fragment_length=args.fragment_length, fragment_run_start=start, fragment_run_end=end)
+    results = librun.run(
+        matrix,
+        force_cache=True,
+        fragment_id=args.fragment_id,
+        fragment_length=args.fragment_length,
+        fragment_run_start=start,
+        fragment_run_end=end,
+    )
     results_plots = [result[0] for result in results]
     classifiers = [result[1] for result in results]
     classifiers = [clf for clf in classifiers]
-    print("Retrieving classifier results took:", str(datetime.timedelta(seconds=time.monotonic()-s)))
+    print(
+        "Retrieving classifier results took:",
+        str(datetime.timedelta(seconds=time.monotonic() - s)),
+    )
 
     conditions = {
         "SSNCut": SSNCut,
-        #"SC_entropy_mcs": SC_entropy_mcs,
+        # "SC_entropy_mcs": SC_entropy_mcs,
         "SC_mes": SC_mes,
-        #"SC_oracle_acc": SC_oracle_acc_mcs,
-        #"Stabilizing Predictions": StabilizingPredictions,
-        #"Performance Convergence": PerformanceConvergence,
-        #"Uncertainty Convergence": UncertaintyConvergence,
-        #"Max Confidence": MaxConfidence,
-        #"EVM": EVM,
-        #"VM": VM,
-        #"Contradictory Information": ContradictoryInformation,
+        # "SC_oracle_acc": SC_oracle_acc_mcs,
+        # "Stabilizing Predictions": StabilizingPredictions,
+        # "Performance Convergence": PerformanceConvergence,
+        # "Uncertainty Convergence": UncertaintyConvergence,
+        # "Max Confidence": MaxConfidence,
+        # "EVM": EVM,
+        # "VM": VM,
+        # "Contradictory Information": ContradictoryInformation,
         "Classification Change": ClassificationChange,
-        #"Overall Uncertainty": OverallUncertainty,
+        # "Overall Uncertainty": OverallUncertainty,
     }
 
     s = time.monotonic()
     stop_conditions, stop_results = libstop.eval_stopping_conditions(
-        results_plots, classifiers, conditions=conditions, recompute=["SC_mes", "Classification Change", "SSNCut"], jobs=args.jobs
+        results_plots,
+        classifiers,
+        conditions=conditions,
+        recompute=["SC_mes", "Classification Change", "SSNCut"],
+        jobs=args.jobs,
     )
-    print("Computing stop conditions took:", str(datetime.timedelta(seconds=time.monotonic()-s)))
+    print(
+        "Computing stop conditions took:",
+        str(datetime.timedelta(seconds=time.monotonic() - s)),
+    )
+
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument('fragment_id', type=int)
-    parser.add_argument('fragment_length', type=int)
-    parser.add_argument('fragment_run')
-    parser.add_argument('--jobs', type=int, default=20)
+    parser.add_argument("fragment_id", type=int)
+    parser.add_argument("fragment_length", type=int)
+    parser.add_argument("fragment_run")
+    parser.add_argument("--jobs", type=int, default=20)
 
     args = parser.parse_args()
     main(args)

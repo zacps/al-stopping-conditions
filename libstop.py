@@ -104,7 +104,8 @@ class Criteria(ABC):
     def all_criteria(cls) -> List[Type]:
         # https://stackoverflow.com/questions/3862310/how-to-find-all-the-subclasses-of-a-class-given-its-name
         return set(cls.__subclasses__()).union(
-        [s for c in cls.__subclasses__() for s in cls.all_criteria(c)])
+            [s for c in cls.__subclasses__() for s in cls.all_criteria(c)]
+        )
 
 
 @dataclass
@@ -141,7 +142,6 @@ class SC_oracle_acc_mcs(Criteria):
     def metric(self, classifiers, **kwargs):
         return acc_last(classifiers)[1]
 
-
     def condition(self, x, metric):
         """
         Determine a stopping point based on when the accuracy of the current classifier on the
@@ -170,11 +170,15 @@ class SC_mes(Criteria):
     def metric(self, classifiers, **kwargs):
         out = []
         rand = np.random.default_rng(42)
-        for i, clf in enumerate(classifiers):            
-            subsample = rand.choice(clf.X_unlabelled.shape[0], min(1000, clf.X_unlabelled.shape[0]), replace=False)
-            
+        for i, clf in enumerate(classifiers):
+            subsample = rand.choice(
+                clf.X_unlabelled.shape[0],
+                min(1000, clf.X_unlabelled.shape[0]),
+                replace=False,
+            )
+
             max_pred = np.max(clf.predict_proba(clf.X_unlabelled[subsample]), axis=1)
-            out.append((1/subsample.shape[0]) * np.sum(1 - max_pred))
+            out.append((1 / subsample.shape[0]) * np.sum(1 - max_pred))
         return np.array(out)
 
     def condition(self, x, metric):
@@ -202,7 +206,6 @@ class EVM(Criteria):
     n: int = 2
     m: float = 1e-3
 
-
     def metric(self, uncertainty_variance, uncertainty_variance_selected, **kwargs):
         return uncertainty_variance_selected if self.selected else uncertainty_variance
 
@@ -217,11 +220,11 @@ class EVM(Criteria):
                 current += 1
             last = value
         raise FailedToTerminate("EVM")
-        
+
 
 class VM(EVM):
     m: float = 0
-        
+
 
 @dataclass
 class SSNCut(Criteria):
@@ -244,23 +247,29 @@ class SSNCut(Criteria):
     ):
         if self.verbose:
             print("SSNCut metric start")
-        if any(getattr(clf.estimator, "kernel", None) != "linear" for clf in classifiers):
+        if any(
+            getattr(clf.estimator, "kernel", None) != "linear" for clf in classifiers
+        ):
             raise InvalidAssumption("SSNCut", "model is not a linear SVM")
 
         unique_y = np.unique(classifiers[0].y_training)
         if len(unique_y) > 2:
             raise InvalidAssumption("SSNCut", "dataset is not binary")
 
-        clustering = SpectralClustering(n_clusters=unique_y.shape[0], affinity='precomputed')
+        clustering = SpectralClustering(
+            n_clusters=unique_y.shape[0], affinity="precomputed"
+        )
 
         out = []
-        
+
         if self.verbose:
             print(f"0/{len(classifiers)}")
         for i, clf in enumerate(classifiers):
             t0 = time.monotonic()
             # Note: With non-binary classification the value of the decision function is a transformation of the distance...
-            order = np.argsort(np.abs(clf.estimator.decision_function(clf.X_unlabelled)))
+            order = np.argsort(
+                np.abs(clf.estimator.decision_function(clf.X_unlabelled))
+            )
             M = clf.X_unlabelled[order[: min(1000, clf.X_unlabelled.shape[0])]]
 
             y0 = clf.predict(M)
@@ -269,7 +278,7 @@ class SSNCut(Criteria):
             # * Is linear, to fit the rbf svm/rbf affinity pattern in the paper
             # * Handles non-normalized samples (rules out linear)
             # * Is non-negative (condition of scikit-learn's implementation)
-            affinity = pairwise_kernels(M, metric="cosine")+1
+            affinity = pairwise_kernels(M, metric="cosine") + 1
             assert np.all(affinity >= 0)
             y1 = clustering.fit_predict(affinity)
 
@@ -278,10 +287,10 @@ class SSNCut(Criteria):
             if diff > 0.5:
                 diff = 1 - diff
             out.append(diff)
-            
+
             if self.verbose:
                 print(f"{time.monotonic()-t0:.2f},")
-            
+
         return out
 
     def condition(self, x, metric):
@@ -343,7 +352,9 @@ class PerformanceConvergence(Criteria):
         for clf in classifiers:
             X_subsampled = clf.X_unlabelled[
                 np.random.choice(
-                    clf.X_unlabelled.shape[0], min(clf.X_unlabelled.shape[0], 1000), replace=False
+                    clf.X_unlabelled.shape[0],
+                    min(clf.X_unlabelled.shape[0], 1000),
+                    replace=False,
                 )
             ]
 
@@ -363,7 +374,7 @@ class PerformanceConvergence(Criteria):
                 return np.sum(p * (1 - d))
 
             yield 2 * tp(p, d) / (2 * tp(p, d) + fp(p, d) + fn(p, d))
-            
+
     def weak_determine_start(self, metric):
         return np.argmax(np.array(metric) >= self.weak_threshold)
 
@@ -373,77 +384,110 @@ class PerformanceConvergence(Criteria):
             w2 = self.average(windows[i])
             w1 = self.average(windows[i - 1])
             g = w2 - w1
-            if windows[i][-1] > np.max(metric[: i + self.k - 1]) and g > 0 and g < self.threshold:
-                return x.iloc[i + self.k-1]
+            if (
+                windows[i][-1] > np.max(metric[: i + self.k - 1])
+                and g > 0
+                and g < self.threshold
+            ):
+                return x.iloc[i + self.k - 1]
 
         raise FailedToTerminate("performance_convergence")
-        
-        
+
+
 @dataclass
 class SecondDiffZeroPerformanceConvergence(PerformanceConvergence):
     alpha: float = 1e-1
-    diffkernel: str = 'sq'
+    diffkernel: str = "sq"
     wait_iters: int = 5
     start_threshold: float = 0.1
     start_method: str = "1"
-        
+
     def metric(self, **kwargs):
         met = super().metric(**kwargs)
-        grad = np.array(no_ahead_tvregdiff(met, 1, self.alpha, diffkernel=self.diffkernel, plotflag=False, diagflag=False))
-        sec = np.array(no_ahead_tvregdiff(grad, 1, self.alpha, diffkernel=self.diffkernel, plotflag=False, diagflag=False))
+        grad = np.array(
+            no_ahead_tvregdiff(
+                met,
+                1,
+                self.alpha,
+                diffkernel=self.diffkernel,
+                plotflag=False,
+                diagflag=False,
+            )
+        )
+        sec = np.array(
+            no_ahead_tvregdiff(
+                grad,
+                1,
+                self.alpha,
+                diffkernel=self.diffkernel,
+                plotflag=False,
+                diagflag=False,
+            )
+        )
         return met, grad, sec
-    
+
     def determine_start(self, sec):
         return np.argmax(sec >= self.start_threshold)
-    
+
     def condition(self, x, metric):
         met, grad, sec = metric
-        
+
         if self.start_method == "1":
             start = self.determine_start(sec)
         else:
             start = self.weak_determine_start(met)
-            
+
         if not (sec[start:] <= 0).any():
-            raise FailedToTerminate('SecondDiffZeroPerformanceConvergence')
-        
+            raise FailedToTerminate("SecondDiffZeroPerformanceConvergence")
+
         # stop when we hit zero
-        return x.iloc[np.argmax(sec[start:] <= 0)+start]
-    
-    
+        return x.iloc[np.argmax(sec[start:] <= 0) + start]
+
+
 @dataclass
 class FirstDiffZeroPerformanceConvergence(PerformanceConvergence):
     alpha: float = 1e-1
-    diffkernel: str = 'sq'
+    diffkernel: str = "sq"
     wait_iters: int = 5
     start_threshold: float = 1e-1
     start_iters: int = 5
     start_method: str = "1"
-        
+
     def metric(self, **kwargs):
         met = super().metric(**kwargs)
-        grad = np.array(no_ahead_tvregdiff(met, 1, self.alpha, diffkernel=self.diffkernel, plotflag=False, diagflag=False))
+        grad = np.array(
+            no_ahead_tvregdiff(
+                met,
+                1,
+                self.alpha,
+                diffkernel=self.diffkernel,
+                plotflag=False,
+                diagflag=False,
+            )
+        )
         return met, grad
-    
+
     def determine_start(self, grad):
         # Find nth value where the threshold is exceeded
         if np.count_nonzero(grad >= self.start_threshold) < self.start_iters:
-            raise FailedToTerminate('FirstDiffZeroPerformanceConvergence')
-        return np.searchsorted(np.cumsum(grad >= self.start_threshold), self.start_iters)
-    
+            raise FailedToTerminate("FirstDiffZeroPerformanceConvergence")
+        return np.searchsorted(
+            np.cumsum(grad >= self.start_threshold), self.start_iters
+        )
+
     def condition(self, x, metric):
         met, grad = metric
-        
+
         if self.start_method == "1":
             start = self.determine_start(grad)
         else:
             start = self.weak_determine_start(met)
-            
+
         if not (grad[start:] >= 0).any():
-            raise FailedToTerminate('FirstDiffZeroPerformanceConvergence')
-        
+            raise FailedToTerminate("FirstDiffZeroPerformanceConvergence")
+
         # stop when we hit zero
-        return x.iloc[np.argmax(grad[start:] <= 0)+start]
+        return x.iloc[np.argmax(grad[start:] <= 0) + start]
 
 
 @dataclass
@@ -481,7 +525,11 @@ class UncertaintyConvergence(Criteria):
             w2 = self.average(windows[i])
             w1 = self.average(windows[i - 1])
             g = w2 - w1
-            if windows[i][-1] > np.max(metric[: i + self.k - 1]) and g > 0 and g < self.threshold:
+            if (
+                windows[i][-1] > np.max(metric[: i + self.k - 1])
+                and g > 0
+                and g < self.threshold
+            ):
                 return x.iloc[i + self.k - 1]
 
         raise FailedToTerminate("UncertaintyConvergence")
@@ -494,13 +542,13 @@ class OverallUncertainty(Criteria):
 
     https://www.aclweb.org/anthology/C08-1142.pdf
     """
-    
+
     threshold: float = 1e-2
     weak_threshold: float = 1.5e-1
 
     def metric(self, uncertainty_average, **kwargs):
         return uncertainty_average
-    
+
     def threshold_determine_start(self, metric):
         "Determine a point safe to start evaluating unstable conditions"
         return np.argmax(metric < self.weak_threshold)
@@ -509,132 +557,174 @@ class OverallUncertainty(Criteria):
         if not (metric < self.threshold).any():
             raise FailedToTerminate("overall_uncertainty")
         return x.iloc[np.argmax(metric < self.threshold)]
-    
-    
+
+
 @dataclass
 class FirstDiffMinOverallUncertainty(OverallUncertainty):
     """
     Modified OverallUncertainty which stops when the first derivative hits an (estimated) global
     minimum.
-    
+
     * eps, diffkernel control the regularlization of the differentiation algorithm
     * stop_iters determines how many rounds we check to see if we have a minimum
     """
+
     alpha: float = 1e-1
-    diffkernel: str = 'sq'
+    diffkernel: str = "sq"
     stop_iters: int = 5
-    
+
     start_method: str = "1"
-    
+
     start_threshold: float = -1e-1
     start_iters: int = 5
-    
-        
+
     def metric(self, **kwargs):
         met = super().metric(**kwargs)
-        grad = np.array(no_ahead_tvregdiff(met, 1, self.alpha, diffkernel=self.diffkernel, plotflag=False, diagflag=False))
+        grad = np.array(
+            no_ahead_tvregdiff(
+                met,
+                1,
+                self.alpha,
+                diffkernel=self.diffkernel,
+                plotflag=False,
+                diagflag=False,
+            )
+        )
         return met, grad
-    
+
     def determine_start(self, grad):
         # Find nth value where the threshold is exceeded
         if np.count_nonzero(grad <= self.start_threshold) < self.start_iters:
-            raise FailedToTerminate('FirstDiffMinOverallUncertainty')
-        return np.searchsorted(np.cumsum(grad <= self.start_threshold), self.start_iters)
-        
+            raise FailedToTerminate("FirstDiffMinOverallUncertainty")
+        return np.searchsorted(
+            np.cumsum(grad <= self.start_threshold), self.start_iters
+        )
+
     def condition(self, x, metric):
         met, grad = metric
-        
+
         if self.start_method == "1":
             start = self.determine_start(grad)
         else:
             start = self.threshold_determine_start(met)
-        
+
         minimum = 1e-1
-        iters = self.stop_iters+1 # Will not terminate until min set
+        iters = self.stop_iters + 1  # Will not terminate until min set
         for i, v in enumerate(grad[start:]):
             if iters == self.stop_iters:
-                return x.iloc[i+start]
+                return x.iloc[i + start]
             if v < minimum:
                 minimum = v
                 iters = 0
             else:
                 iters += 1
-        raise FailedToTerminate('FirstDiffMinOverallUncertainty')
-        
-        
+        raise FailedToTerminate("FirstDiffMinOverallUncertainty")
+
+
 @dataclass
 class FirstDiffZeroOverallUncertainty(OverallUncertainty):
     alpha: float = 1e-1
-    diffkernel: str = 'sq'
+    diffkernel: str = "sq"
     wait_iters: int = 5
-        
+
     start_method: str = "1"
-        
+
     start_threshold: float = -1e-1
     start_iters: int = 5
-        
+
     def metric(self, **kwargs):
         met = super().metric(**kwargs)
-        grad = np.array(no_ahead_tvregdiff(met, 1, self.alpha, diffkernel=self.diffkernel, plotflag=False, diagflag=False))
+        grad = np.array(
+            no_ahead_tvregdiff(
+                met,
+                1,
+                self.alpha,
+                diffkernel=self.diffkernel,
+                plotflag=False,
+                diagflag=False,
+            )
+        )
         return met, grad
-    
+
     def determine_start(self, grad):
         # Find nth value where the threshold is exceeded
         if np.count_nonzero(grad <= self.start_threshold) < self.start_iters:
-            raise FailedToTerminate('FirstDiffZeroOverallUncertainty')
-        return np.searchsorted(np.cumsum(grad <= self.start_threshold), self.start_iters)
-    
+            raise FailedToTerminate("FirstDiffZeroOverallUncertainty")
+        return np.searchsorted(
+            np.cumsum(grad <= self.start_threshold), self.start_iters
+        )
+
     def condition(self, x, metric):
         met, grad = metric
-        
+
         if self.start_method == "1":
             start = self.determine_start(grad)
         else:
             start = self.threshold_determine_start(met)
-            
+
         if not (grad[start:] >= 0).any():
-            raise FailedToTerminate('FirstDiffZeroOverallUncertainty')
-        
+            raise FailedToTerminate("FirstDiffZeroOverallUncertainty")
+
         # stop when we hit zero
-        return x.iloc[np.argmax(grad[start:] >= 0)+start]
-        
-        
+        return x.iloc[np.argmax(grad[start:] >= 0) + start]
+
+
 @dataclass
 class SecondDiffZeroOverallUncertainty(OverallUncertainty):
     alpha: float = 1e-1
-    diffkernel: str = 'sq'
+    diffkernel: str = "sq"
     wait_iters: int = 5
-        
+
     start_method: str = "1"
-        
+
     start_threshold: float = -1e-1
     start_iters: int = 5
-        
+
     def metric(self, **kwargs):
         met = super().metric(**kwargs)
-        grad = np.array(no_ahead_tvregdiff(met, 1, self.alpha, diffkernel=self.diffkernel, plotflag=False, diagflag=False))
-        sec = np.array(no_ahead_tvregdiff(grad, 1, self.alpha, diffkernel=self.diffkernel, plotflag=False, diagflag=False))
+        grad = np.array(
+            no_ahead_tvregdiff(
+                met,
+                1,
+                self.alpha,
+                diffkernel=self.diffkernel,
+                plotflag=False,
+                diagflag=False,
+            )
+        )
+        sec = np.array(
+            no_ahead_tvregdiff(
+                grad,
+                1,
+                self.alpha,
+                diffkernel=self.diffkernel,
+                plotflag=False,
+                diagflag=False,
+            )
+        )
         return met, grad, sec
-    
+
     def determine_start(self, sec):
         # Find nth value where the threshold is exceeded
         if np.count_nonzero(sec <= self.start_threshold) < self.start_iters:
-            raise FailedToTerminate('FirstDiffZeroOverallUncertainty')
-        start = np.searchsorted(np.cumsum(sec <= self.start_threshold), self.start_iters)
-    
+            raise FailedToTerminate("FirstDiffZeroOverallUncertainty")
+        start = np.searchsorted(
+            np.cumsum(sec <= self.start_threshold), self.start_iters
+        )
+
     def condition(self, x, metric):
         met, grad, sec = metric
-        
+
         if self.start_method == "1":
             start = self.determine_start(sec)
         else:
             start = self.threshold_determine_start(met)
-            
+
         if not (sec[start:] >= 0).any():
-            raise FailedToTerminate('FirstDiffZeroOverallUncertainty')
-        
+            raise FailedToTerminate("FirstDiffZeroOverallUncertainty")
+
         # stop when we hit zero
-        return x.iloc[np.argmax(sec[start:] >= 0)+start]
+        return x.iloc[np.argmax(sec[start:] >= 0) + start]
 
 
 @dataclass
@@ -651,11 +741,13 @@ class ClassificationChange(Criteria):
         rand = np.random.default_rng(42)
 
         for i in range(1, len(classifiers)):
-            X_subsampled = classifiers[i].X_unlabelled[rand.choice(
-                classifiers[i].X_unlabelled.shape[0], 
-                min(1000, classifiers[i].X_unlabelled.shape[0]),
-                replace=False
-            )]
+            X_subsampled = classifiers[i].X_unlabelled[
+                rand.choice(
+                    classifiers[i].X_unlabelled.shape[0],
+                    min(1000, classifiers[i].X_unlabelled.shape[0]),
+                    replace=False,
+                )
+            ]
             yield np.count_nonzero(
                 classifiers[i - 1].predict(X_subsampled)
                 == classifiers[i].predict(X_subsampled)
@@ -665,7 +757,7 @@ class ClassificationChange(Criteria):
         if not any(np.isclose(x, 1) for x in metric):
             raise FailedToTerminate("classification_change")
 
-        return x.iloc[np.argmax(np.isclose(metric[1:], 1))+1]
+        return x.iloc[np.argmax(np.isclose(metric[1:], 1)) + 1]
 
 
 def reconstruct_unlabelled(clfs, X_unlabelled, Y_oracle, dense_atol=1e-6):
@@ -785,12 +877,18 @@ class NSupport(Criteria):
     stable_iters: int = 2
 
     def metric(self, classifiers, n_support, **kwargs):
-        if any(getattr(clf.estimator, "kernel", None) != "linear" for clf in classifiers):
+        if any(
+            getattr(clf.estimator, "kernel", None) != "linear" for clf in classifiers
+        ):
             raise InvalidAssumption("n_support only supports linear SVMs")
         return n_support
 
     def condition(self, x, metric):
-        return x.iloc[__is_approx_constant(metric, threshold=self.threshold, stable_iters=self.stable_iters)]
+        return x.iloc[
+            __is_approx_constant(
+                metric, threshold=self.threshold, stable_iters=self.stable_iters
+            )
+        ]
 
 
 @dataclass
@@ -814,7 +912,7 @@ class StabilizingPredictions(Criteria):
 
     def metric(self, x, classifiers, **kwargs):
         return kappa_metric(x, classifiers, k=self.k)
-    
+
     def weak_determine_start(self, metric):
         return np.argmax(metric >= self.weak_threshold)
 
@@ -822,45 +920,54 @@ class StabilizingPredictions(Criteria):
         if not (metric >= self.threshold).any():
             raise FailedToTerminate("stabilizing_predictions")
         return x[np.argmax(metric >= self.threshold)]
-    
-    
+
+
 @dataclass
 class StabilizingPredictionsPlusX(Criteria):
     add_x: int = 100
-    
+
     def condition(self, x, metric):
         return super().condition(x, metric) + self.add_x
-    
-    
+
+
 @dataclass
 class FirstDiffZeroStabilizingPredictions(StabilizingPredictions):
     alpha: float = 1e-1
-    diffkernel: str = 'sq'
+    diffkernel: str = "sq"
     start_method: str = "1"
-    
+
     def metric(self, **kwargs):
         met = super().metric(**kwargs)
-        grad = np.array(no_ahead_tvregdiff(met, 1, self.alpha, diffkernel=self.diffkernel, plotflag=False, diagflag=False))
+        grad = np.array(
+            no_ahead_tvregdiff(
+                met,
+                1,
+                self.alpha,
+                diffkernel=self.diffkernel,
+                plotflag=False,
+                diagflag=False,
+            )
+        )
         return met, grad
-    
+
     def determine_start(self, grad):
         # Find first point > 0; TODO: This might need to be more rigorous.
-        return np.argmax(grad>0)
-    
+        return np.argmax(grad > 0)
+
     def condition(self, x, metric):
         met, grad = metric
-        
+
         if self.start_method == "1":
             start = self.determine_start(grad)
         else:
             start = self.weak_determine_start(met)
-        
+
         # Find first point after that <= 0
-        if not (grad[start:]<=0).any():
+        if not (grad[start:] <= 0).any():
             raise FailedToTerminate("FirstDiffZeroStabilizingPredictions")
-        
-        return x.iloc[np.argmax(grad[start:]<=0)]
-    
+
+        return x.iloc[np.argmax(grad[start:] <= 0)]
+
 
 @listify
 def metric_selected(classifiers, metric, aggregator=np.min, **kwargs):
@@ -869,12 +976,12 @@ def metric_selected(classifiers, metric, aggregator=np.min, **kwargs):
 
     The metric is then aggregated across the batch by the `aggregator` to produce a single value per round.
     """
-    
+
     for i in range(1, len(classifiers)):
         yield aggregator(
             metric(classifiers[i - 1].estimator, classifiers[i].X_training[-10:])
         )
-        
+
     yield np.nan
 
 
@@ -892,13 +999,14 @@ class MaxConfidence(Criteria):
     threshold: float = 0.001
 
     def metric(self, classifiers, **kwargs):
-        return np.array(metric_selected(classifiers, classifier_entropy, aggregator=np.min))
-
+        return np.array(
+            metric_selected(classifiers, classifier_entropy, aggregator=np.min)
+        )
 
     def condition(self, x, metric):
         if not (metric < self.threshold).any():
             raise FailedToTerminate("max_confidence")
-            
+
         # We don't do the last selection so have one NaN at the end of the metric
         return x[np.argmax(metric[:-1] < self.threshold)]
 
@@ -911,15 +1019,23 @@ class GOAL(Criteria):
     safety_factor: float = 1.0
     order: int = 2
     # Addition from the original paper, sq works better in most scenarios (TODO: try it!)
-    diffkernel: str = 'abs'
+    diffkernel: str = "abs"
     # Affects regularization, 1e-1 or 1e-2 are best
     alpha: float = 1e-1
-
 
     def metric(self, classifiers, **kwargs):
         assert self.safety_factor >= 1.0, "safety factor cannot be less than 1"
         accx, _acc = first_acc(classifiers)
-        grad = np.array(no_ahead_tvregdiff(_acc, 1, self.alpha, diffkernel=self.diffkernel, plotflag=False, diagflag=False))
+        grad = np.array(
+            no_ahead_tvregdiff(
+                _acc,
+                1,
+                self.alpha,
+                diffkernel=self.diffkernel,
+                plotflag=False,
+                diagflag=False,
+            )
+        )
         start = np.argmax(grad < 0)
 
         if self.order == 2:
@@ -927,7 +1043,14 @@ class GOAL(Criteria):
                 [
                     np.nan,
                     np.nan,
-                    *no_ahead_tvregdiff(grad[2:], 1, self.alpha, diffkernel=self.diffkernel, plotflag=False, diagflag=False),
+                    *no_ahead_tvregdiff(
+                        grad[2:],
+                        1,
+                        self.alpha,
+                        diffkernel=self.diffkernel,
+                        plotflag=False,
+                        diagflag=False,
+                    ),
                 ]
             )
 
@@ -948,7 +1071,9 @@ class GOAL(Criteria):
                 raise FailedToTerminate("ZPS")
         else:
             try:
-                return accx[int((np.argmax(grad[start:] >= 0) + start) * self.safety_factor)]
+                return accx[
+                    int((np.argmax(grad[start:] >= 0) + start) * self.safety_factor)
+                ]
             except IndexError:
                 raise FailedToTerminate("ZPS")
 
@@ -965,7 +1090,7 @@ def acc_last(classifiers, metric=metrics.accuracy_score):
     x = [classifiers[0].X_training.shape[0]]
     diffs = [np.nan]
     start = 1
-    
+
     pclf = classifiers[0]
     unique_labels = np.unique(pclf.y_training)
     for i in range(start, len(classifiers)):
@@ -983,7 +1108,6 @@ def acc_last(classifiers, metric=metrics.accuracy_score):
         pclf = clf
 
     return x, diffs
-
 
 
 def acc(classifiers, metric=metrics.accuracy_score, nth=0):
@@ -1092,7 +1216,6 @@ def first_acc(classifiers, metric=metrics.accuracy_score, **kwargs):
     return x, diffs
 
 
-
 def kappa_metric(x, classifiers, k=3, **kwargs):
     from sklearn.preprocessing import OneHotEncoder
 
@@ -1122,10 +1245,10 @@ def kappa_metric(x, classifiers, k=3, **kwargs):
 def no_ahead_tvregdiff(value, *args, **kwargs):
     # Filter out leading NaNs before running TVRegDiff, it propagates but we want to ignore (but keep in output)
     first_nonnan = np.argmax(~np.isnan(value))
-    
+
     # The first two values are nan regardless as we need to evaluate on shape of at least 2
-    out = [np.nan]*(2+first_nonnan)
-    for i in range(first_nonnan+2, len(value)):
+    out = [np.nan] * (2 + first_nonnan)
+    for i in range(first_nonnan + 2, len(value)):
         out.append(TVRegDiff(value[first_nonnan:i], *args, **kwargs)[-1])
     return out
 
@@ -1133,6 +1256,7 @@ def no_ahead_tvregdiff(value, *args, **kwargs):
 # ----------------------------------------------------------------------------------------------
 # Metric evaluators
 # ----------------------------------------------------------------------------------------------
+
 
 def __is_approx_constant(values, stable_iters=3, threshold=1e-1, **kwargs):
     """
@@ -1152,15 +1276,27 @@ def __is_approx_constant(values, stable_iters=3, threshold=1e-1, **kwargs):
             n = 0
     return -1
 
+
 # ----------------------------------------------------------------------------------------------
 # Evaluation
 # ----------------------------------------------------------------------------------------------
 
 
-StopResult = namedtuple('StopResult', ['instances', 'accuracy_score', 'f1_score', 'roc_auc_score', 'metric'])
+StopResult = namedtuple(
+    "StopResult", ["instances", "accuracy_score", "f1_score", "roc_auc_score", "metric"]
+)
 
 
-def eval_cond(dataset_results: Dict, name: str, conf: Config, condcls: Type, j: int, recompute: list, memory_profile: bool = False, **kwargs):
+def eval_cond(
+    dataset_results: Dict,
+    name: str,
+    conf: Config,
+    condcls: Type,
+    j: int,
+    recompute: list,
+    memory_profile: bool = False,
+    **kwargs,
+):
     # Restore saved result if possible
     if (
         name in dataset_results
@@ -1173,8 +1309,9 @@ def eval_cond(dataset_results: Dict, name: str, conf: Config, condcls: Type, j: 
     # Memory profiling
     if memory_profile:
         from pympler import asizeof
+
         print(asizeof.asized(locals(), detail=3).format())
-            
+
     metric_start = time.monotonic()
 
     # Instantiate condition class
@@ -1190,13 +1327,16 @@ def eval_cond(dataset_results: Dict, name: str, conf: Config, condcls: Type, j: 
             f"WARNING {name} failed evaluating metric on {conf.dataset_name} run {j} with exception: {e}"
         )
         raise e
-        
-    print(f"Evaluating metric {name} on {conf.dataset_name} took:", str(datetime.timedelta(seconds=time.monotonic()-metric_start)))
+
+    print(
+        f"Evaluating metric {name} on {conf.dataset_name} took:",
+        str(datetime.timedelta(seconds=time.monotonic() - metric_start)),
+    )
     cond_start = time.monotonic()
 
     # Attempt to evaluate, and return, the stop point & metric
     try:
-        return cond.condition(x=kwargs['x'], metric=metric), metric
+        return cond.condition(x=kwargs["x"], metric=metric), metric
     except FailedToTerminate:
         print(f"{name} failed to terminate on {conf.dataset_name} run {j}")
         return None, metric
@@ -1206,15 +1346,28 @@ def eval_cond(dataset_results: Dict, name: str, conf: Config, condcls: Type, j: 
         )
         raise e
     finally:
-        print(f"Evaluating cond {name} on {conf.dataset_name} took:", str(datetime.timedelta(seconds=time.monotonic()-cond_start)))
-        print(f"Evaluating {name} on {conf.dataset_name} took:", str(datetime.timedelta(seconds=time.monotonic()-metric_start)))
+        print(
+            f"Evaluating cond {name} on {conf.dataset_name} took:",
+            str(datetime.timedelta(seconds=time.monotonic() - cond_start)),
+        )
+        print(
+            f"Evaluating {name} on {conf.dataset_name} took:",
+            str(datetime.timedelta(seconds=time.monotonic() - metric_start)),
+        )
 
 
-def eval_stopping_conditions(results_plots, classifiers, conditions=None, recompute=[], jobs=None, save=True, memory_profile=False, write_dir='stopping2'):
+def eval_stopping_conditions(
+    results_plots,
+    classifiers,
+    conditions=None,
+    recompute=[],
+    jobs=None,
+    save=True,
+    memory_profile=False,
+    write_dir="stopping2",
+):
     if conditions is None:
-        conditions = {
-            f"{f.display_name}": f for f in Criteria.all_criteria()
-        }
+        conditions = {f"{f.display_name}": f for f in Criteria.all_criteria()}
     if classifiers is None:
         classifiers = itertools.repeat(itertools.repeat(None))
 
@@ -1222,13 +1375,18 @@ def eval_stopping_conditions(results_plots, classifiers, conditions=None, recomp
 
     if memory_profile:
         from pympler import asizeof
+
         print(asizeof.asized(locals(), detail=3).format())
 
     for (clfs, (conf, metrics)) in zip(classifiers, results_plots):
         print(f"Starting {conf.model_name} {conf.dataset_name}")
         stop_results[conf.dataset_name] = __read_stopping(conf.serialize())
 
-        jobs = jobs if jobs is not None else min(os.cpu_count(), len(metrics) * len(conditions))
+        jobs = (
+            jobs
+            if jobs is not None
+            else min(os.cpu_count(), len(metrics) * len(conditions))
+        )
         results = np.array(
             Parallel(n_jobs=jobs)(
                 delayed(eval_cond)(
@@ -1241,34 +1399,36 @@ def eval_stopping_conditions(results_plots, classifiers, conditions=None, recomp
                     **metric,
                     classifiers=clfs_,
                     config=conf,
-                    memory_profile=memory_profile
+                    memory_profile=memory_profile,
                 )
                 for j, clfs_, metric in zip(conf.runs, clfs, metrics)
                 for (name, cond) in conditions.items()
-            ), 
-            dtype=object
+            ),
+            dtype=object,
         ).reshape(len(metrics), len(conditions), 2)
 
         for i in range(len(conditions)):
             try:
-                assert len(conf.runs) == len(results[:,i])
+                assert len(conf.runs) == len(results[:, i])
                 stop_results[conf.dataset_name][list(conditions.keys())[i]] = {
                     runid: StopResult(
                         x
-                            if list(conditions.keys())[i] != "SSNCut"
-                            else (x + 10 if x is not None else None),
+                        if list(conditions.keys())[i] != "SSNCut"
+                        else (x + 10 if x is not None else None),
                         metrics[j]["accuracy_score"][metrics[j].x == x].iloc[0]
-                            if x is not None
-                            else None,
+                        if x is not None
+                        else None,
                         metrics[j]["f1_score"][metrics[j].x == x].iloc[0]
-                            if x is not None
-                            else None,
+                        if x is not None
+                        else None,
                         metrics[j]["roc_auc_score"][metrics[j].x == x].iloc[0]
-                            if x is not None
-                            else None,
-                        metric
+                        if x is not None
+                        else None,
+                        metric,
                     )
-                    for runid, (j, (x, metric)) in zip(conf.runs, enumerate(results[:, i]))
+                    for runid, (j, (x, metric)) in zip(
+                        conf.runs, enumerate(results[:, i])
+                    )
                 }
             except IndexError as e:
                 print(
@@ -1277,7 +1437,9 @@ def eval_stopping_conditions(results_plots, classifiers, conditions=None, recomp
                 raise e
         if save:
             print(f"Saving stop results to {conf.serialize()}")
-            __write_stopping(conf.serialize(), stop_results[conf.dataset_name], write_dir)
+            __write_stopping(
+                conf.serialize(), stop_results[conf.dataset_name], write_dir
+            )
 
     return (conditions, stop_results)
 
@@ -1430,26 +1592,20 @@ def in_bounds(stop_results):
 
 
 def rank_stop_conds(
-    stop_results,
-    metric,
-    ax=None,
-    title=None,
-    average=False,
-    passive=False,
-    func=None
+    stop_results, metric, ax=None, title=None, average=False, passive=False, func=None
 ):
     data = []
     # n instances data
     for i, dataset in enumerate(stop_results.keys()):
-        
+
         max_inst = 0
-        min_acc = 1.
+        min_acc = 1.0
         for rs in stop_results[dataset].values():
             for r in rs:
                 if r[0] is not None:
                     max_inst = max(max_inst, r[0])
                     min_acc = min(min_acc, r[1])
-        
+
         for ii, method in enumerate(stop_results[dataset].keys()):
             if i == 0:
                 data.append([])
@@ -1464,13 +1620,9 @@ def rank_stop_conds(
                     values.append(x)
                 elif metric == "func":
                     if x is not None:
-                        values.append(
-                            func(x, accuracy, f1, roc_auc)
-                        )
+                        values.append(func(x, accuracy, f1, roc_auc))
                     else:
-                        values.append(
-                            func(max_inst, min_acc, None, None)
-                        )
+                        values.append(func(max_inst, min_acc, None, None))
                 else:
                     metrics = {"accuracy_score": 0, "f1_score": 1, "roc_auc_score": 2}
                     values.append((accuracy, f1, roc_auc)[metrics[metric]])
@@ -1491,7 +1643,10 @@ def rank_stop_conds(
     )
     print(data.shape)
     autoranked = autorank(
-        data, order="ascending" if metric == "instances" or metric == "func" else "descending"
+        data,
+        order="ascending"
+        if metric == "instances" or metric == "func"
+        else "descending",
     )
 
     ax = plot_stats(autoranked, ax=ax)

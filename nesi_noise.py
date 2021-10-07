@@ -38,7 +38,7 @@ matrix = {
     # Dataset fetchers should cache if possible
     # Lambda wrapper required for function to be pickleable (sent to other threads via joblib)
     "datasets": [
-        #("newsgroups", wrap(newsgroups, None)),
+        # ("newsgroups", wrap(newsgroups, None)),
         ("rcv1", wrap(rcv1, None)),
         ("webkb", wrap(webkb, None)),
         ("spamassassin", wrap(spamassassin, None)),
@@ -99,8 +99,8 @@ capture_metrics = [
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument('fragment_id', type=int)
-    parser.add_argument('fragment_length', type=int)
+    parser.add_argument("fragment_id", type=int)
+    parser.add_argument("fragment_length", type=int)
     parser.add_argument("fragment_run")
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--nobackup", action="store_true")

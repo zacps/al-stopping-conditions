@@ -31,7 +31,7 @@ def find_i(namelist):
             x = max(x, int(s))
         except ValueError:
             pass
-    return x+1
+    return x + 1
 
 
 class CompressedStore:
@@ -172,7 +172,9 @@ class CompressedStoreV2:
                     for x in range(i.start, i.stop or self.i, i.step or 1)
                 ]
             except KeyError:
-                raise IndexError(f"index {i} out of range for store of length {self.i}\n{self.filename}")
+                raise IndexError(
+                    f"index {i} out of range for store of length {self.i}\n{self.filename}"
+                )
 
         if i < 0:
             # print(f"Negative index {i} for len {self.i} gives a filename of {self.i+i}")
@@ -180,7 +182,9 @@ class CompressedStoreV2:
         try:
             return self.set_pools(pickle.Unpickler(self.zip.open(str(i))).load())
         except KeyError:
-            raise IndexError(f"index {i} out of range for store of length {self.i}\n{self.filename}")
+            raise IndexError(
+                f"index {i} out of range for store of length {self.i}\n{self.filename}"
+            )
 
     def set_pools(self, item):
         if not hasattr(item, "initial_X_labelled"):
@@ -351,7 +355,8 @@ def loadz(filelike):
             out[name] = array
     return out
 
+
 def array_equal(a, b):
     if isinstance(a, scipy.sparse.csr_matrix):
-        return (a!=b).nnz == 0
+        return (a != b).nnz == 0
     return np.array_equal(a, b)

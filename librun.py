@@ -80,12 +80,14 @@ def run(
     fragment_run_start=None,
     fragment_run_end=None,
     dry_run=False,
-    ret_classifiers=True
+    ret_classifiers=True,
 ):
     print(sys.argv)
     print(
         "Current commit:",
-        subprocess.run(['git', 'rev-parse', '--short', 'HEAD'], stdout=subprocess.PIPE).stdout.decode('utf-8')
+        subprocess.run(
+            ["git", "rev-parse", "--short", "HEAD"], stdout=subprocess.PIPE
+        ).stdout.decode("utf-8"),
     )
 
     configurations = Configurations(matrix)
@@ -459,7 +461,13 @@ def __run_inner(
 
 
 def plot_stop(
-    plots, classifiers, stop_conditions, stop_results, scale="linear", plot_passive=False, figsize=(26, 4)
+    plots,
+    classifiers,
+    stop_conditions,
+    stop_results,
+    scale="linear",
+    plot_passive=False,
+    figsize=(26, 4),
 ):
     figaxes = plot(plots, ret=True, sort=False, extra=2, scale=scale, figsize=figsize)
     for i, (fig, ax) in enumerate(figaxes):

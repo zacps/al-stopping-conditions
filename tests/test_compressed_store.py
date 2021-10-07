@@ -23,7 +23,7 @@ def test_compressed_store():
 
 def test_compressed_store_v2_indexing():
     with NamedTemporaryFile("ab", delete=False) as file:
-        fname= file.name
+        fname = file.name
 
     store = CompressedStore(fname)
 
@@ -46,5 +46,5 @@ def test_compressed_store_v2_indexing():
 
     store.close()
     del store
-    
+
     os.remove(fname)

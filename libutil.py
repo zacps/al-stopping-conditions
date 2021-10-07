@@ -212,13 +212,13 @@ def n_cpus():
 
 @contextmanager
 def atomic_write(filepath: str, mode: str) -> typing.IO:
-    """ Writeable file object that atomically updates a file (using a temporary file).
+    """Writeable file object that atomically updates a file (using a temporary file).
 
     :param filepath: the file path to be opened
     :param binary: whether to open the file in a binary mode instead of textual
     """
 
-    tmppath = filepath + '.X'
+    tmppath = filepath + ".X"
     try:
         with open(tmppath, mode) as file:
             yield file
@@ -228,6 +228,7 @@ def atomic_write(filepath: str, mode: str) -> typing.IO:
             os.remove(tmppath)
         except (IOError, OSError):
             pass
+
 
 class Notifier:
     def __init__(self, webhook):
@@ -250,7 +251,7 @@ class Notifier:
         )
 
     def error(self, configurations, duration, e):
-        jobid = os.environ.get('SLURM_JOB_ID', None)
+        jobid = os.environ.get("SLURM_JOB_ID", None)
         jobid_str = f" ({jobid})" if jobid is not None else ""
         return self.notify(
             f"Run with {len(configurations)} experiments on {socket.gethostname()} **FAILED** after {duration/60/60:.1f}h{jobid_str}\n```{e}```"
