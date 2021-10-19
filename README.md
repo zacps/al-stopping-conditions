@@ -22,7 +22,7 @@ There are four parts to running the results:
 
 ### Configuration
 
-Create a `.env` file with two keys, `DATASET_DIR` referring to the location to store the datasets (~`1.4GB`) and `OUT_DIR` referring to the place to record the results (~`1TB` compressed).
+Create a `.env` file with two keys, `DATASET_DIR` referring to the location to store the datasets (\~`1.4GB`) and `OUT_DIR` referring to the place to record the results (\~`1TB` compressed).
 
 For example:
 
