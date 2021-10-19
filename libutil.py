@@ -142,6 +142,8 @@ def run_from_ipython():
 def out_dir():
     return os.environ["OUT_DIR"]
 
+def webhook():
+    return os.environ["WEBHOOK"]
 
 def dataset_dir():
     return os.environ["DATASET_DIR"]

@@ -21,7 +21,7 @@ try:
     from IPython.core.display import HTML, display
 except ModuleNotFoundError:
     pass
-from libutil import ProgressParallel, out_dir
+from libutil import ProgressParallel, out_dir, webhook
 from joblib import delayed
 from sklearn.metrics import accuracy_score, f1_score, roc_auc_score
 from sklearn import metrics as skmetrics
@@ -133,9 +133,7 @@ def run(
     else:
         n_runs = configurations.meta["n_runs"]
 
-    notifier = Notifier(
-        "https://discord.com/api/webhooks/809248326485934080/aIHL726wKxk42YpDI_GtjsqfAWuFplO3QrXoza1r55XRT9-Ao9Rt8sBtexZ-WXSPCtsv"
-    )
+    notifier = Notifier(webhook)
 
     try:
         results = ProgressParallel(
