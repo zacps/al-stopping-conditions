@@ -2,6 +2,8 @@
 
 This repository contains the code for the paper 'Hitting the Target: Stopping Active Learning at the Cost-Based Optimum'.
 
+A preprint is available on [arXiv](https://arxiv.org/abs/2110.03802).
+
 ## Installation
 
 Necessary dependencies can be installed with:
