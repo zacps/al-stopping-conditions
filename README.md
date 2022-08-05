@@ -4,7 +4,7 @@ This repository contains the code for the paper 'Hitting the Target: Stopping Ac
 
 A preprint is available on [arXiv](https://arxiv.org/abs/2110.03802). 
 
-Supplementary information is [included in this repository](https://github.com/zacps/al-stopping-conditions/blob/master/Supplimentary%20Information.pdf).
+Supplementary information is [included in this repository](https://github.com/zacps/al-stopping-conditions/blob/master/Supplementary%20Information.pdf).
 
 ## Installation
 
